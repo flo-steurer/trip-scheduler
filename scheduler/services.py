@@ -26,7 +26,7 @@ def idea_leaderboard(trip):
         if karma >= 8:
             title = "Itinerary Overlord"
         elif participant.beer_karma_bonus and not idea_karma:
-            title = "Beer Oracle"
+            title = "Market Wizard"
         elif participant.upvote_count >= participant.post_count and karma:
             title = "Upvote Magnet"
         elif participant.post_count:
@@ -37,13 +37,13 @@ def idea_leaderboard(trip):
             "name": participant.name,
             "post_count": participant.post_count,
             "upvote_count": participant.upvote_count,
-            "bet_karma": participant.beer_karma_bonus,
+            "market_karma": participant.beer_karma_bonus,
             "karma": karma,
             "title": title,
         })
     entries.sort(key=lambda entry: (
         -entry["karma"],
-        -entry["bet_karma"],
+        -entry["market_karma"],
         -entry["upvote_count"],
         -entry["post_count"],
         entry["name"].casefold(),
@@ -177,23 +177,46 @@ def trip_results(trip):
     for proposal in proposal_results:
         proposal.pop("created_at_timestamp", None)
 
-    bets = list(trip.bets.prefetch_related("predictions__participant"))
-    bet_results = []
-    for bet in bets:
-        predictions = list(bet.predictions.all())
-        bet_results.append({
-            "id": bet.id,
-            "question": bet.question,
-            "is_settled": bet.is_settled,
-            "settled_outcome": bet.settled_outcome,
-            "prediction_count": len(predictions),
-            "yes_count": sum(prediction.prediction == "yes" for prediction in predictions),
-            "no_count": sum(prediction.prediction == "no" for prediction in predictions),
-            "predictions": [{
-                "name": prediction.participant.name,
-                "prediction": prediction.prediction,
-                "won": bet.is_settled and prediction.prediction == bet.settled_outcome,
-            } for prediction in predictions],
+    markets = list(trip.markets.prefetch_related("trades__participant"))
+    market_results = []
+    for market in markets:
+        trades = list(market.trades.all())
+        yes_chips = market.seed_chips
+        no_chips = market.seed_chips
+        odds_history = [{
+            "timestamp": market.created_at.isoformat(),
+            "yes_odds": 50,
+        }]
+        positions = defaultdict(lambda: {"yes_shares": 0, "no_shares": 0})
+        for trade in trades:
+            position = positions[trade.participant_id]
+            position["name"] = trade.participant.name
+            if trade.outcome == "yes":
+                yes_chips += trade.chips
+                position["yes_shares"] += trade.chips
+            else:
+                no_chips += trade.chips
+                position["no_shares"] += trade.chips
+            odds_history.append({
+                "timestamp": trade.created_at.isoformat(),
+                "yes_odds": round(yes_chips / (yes_chips + no_chips) * 100),
+            })
+        payouts = market.payout_distribution(trades, market.resolved_outcome) if market.is_resolved else {}
+        market_results.append({
+            "id": market.id,
+            "question": market.question,
+            "is_resolved": market.is_resolved,
+            "resolved_outcome": market.resolved_outcome,
+            "yes_odds": round(yes_chips / (yes_chips + no_chips) * 100),
+            "no_odds": round(no_chips / (yes_chips + no_chips) * 100),
+            "total_chips": sum(trade.chips for trade in trades),
+            "odds_history": odds_history,
+            "positions": [{
+                "name": shares["name"],
+                "yes_shares": shares["yes_shares"],
+                "no_shares": shares["no_shares"],
+                "payout": payouts.get(participant_id, 0),
+            } for participant_id, shares in sorted(positions.items(), key=lambda item: item[1]["name"].casefold())],
         })
 
     return {
@@ -207,7 +230,8 @@ def trip_results(trip):
                 karma_by_participant[participant.id]["post_count"]
                 + karma_by_participant[participant.id]["upvote_count"]
             ),
-            "bet_karma": participant.beer_karma_bonus,
+            "market_karma": participant.beer_karma_bonus,
+            "beer_chips": participant.beer_chips,
             "beer_karma": (
                 karma_by_participant[participant.id]["post_count"]
                 + karma_by_participant[participant.id]["upvote_count"]
@@ -216,5 +240,5 @@ def trip_results(trip):
             "availability": {day.isoformat(): status for day, status in status_by_person[participant.id].items()},
         } for participant in participants],
         "proposals": proposal_results,
-        "bets": bet_results,
+        "markets": market_results,
     }

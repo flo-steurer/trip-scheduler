@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import TripForm
-from .models import Availability, Bet, BetPrediction, Participant, Proposal, ProposalVote, Trip
+from .models import Availability, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
 from .services import idea_leaderboard, trip_results
 
 
@@ -70,6 +70,7 @@ def _participant_payload(participant):
         "id": participant.id,
         "name": participant.name,
         "minimum_attendance_days": participant.minimum_attendance_days,
+        "beer_chips": participant.beer_chips,
     }
 
 
@@ -150,6 +151,15 @@ def leaderboard(request, public_id):
     return render(request, "scheduler/leaderboard.html", {
         "trip": trip,
         "leaderboard": idea_leaderboard(trip),
+    })
+
+
+@require_GET
+def beermarket(request, public_id):
+    trip = _trip(public_id)
+    return render(request, "scheduler/beermarket.html", {
+        "trip": trip,
+        "initial_results": trip_results(trip),
     })
 
 
@@ -312,24 +322,36 @@ def proposal_vote_api(request, public_id, proposal_id):
 
 
 @require_POST
-def bet_prediction_api(request, public_id, bet_id):
+def market_trade_api(request, public_id, market_id):
     trip = _trip(public_id)
-    bet = get_object_or_404(Bet, trip=trip, pk=bet_id)
+    market = get_object_or_404(Market, trip=trip, pk=market_id)
     body = _json_body(request)
     if body is None:
         return JsonResponse({"error": "Expected a JSON request body."}, status=400)
     participant, error = _participant_for_name(trip, body.get("name"))
     if error:
         return JsonResponse({"error": error}, status=400)
-    prediction = body.get("prediction")
-    if prediction not in Bet.Outcome.values:
+    outcome = body.get("outcome")
+    if outcome not in Market.Outcome.values:
         return JsonResponse({"error": "Choose Yes or No."}, status=400)
-    if bet.is_settled:
-        return JsonResponse({"error": "This Beer Bet has already been settled."}, status=400)
-    BetPrediction.objects.update_or_create(
-        bet=bet,
-        participant=participant,
-        defaults={"prediction": prediction},
-    )
-    _activity(request, participant, f"bet_prediction_set_{prediction}")
+    chips = body.get("chips")
+    if isinstance(chips, bool):
+        return JsonResponse({"error": "Choose a whole number of Beer Chips."}, status=400)
+    try:
+        chips = int(chips)
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Choose a whole number of Beer Chips."}, status=400)
+    if chips < 1:
+        return JsonResponse({"error": "Spend at least 1 Beer Chip."}, status=400)
+    with transaction.atomic():
+        market = Market.objects.select_for_update().get(trip=trip, pk=market_id)
+        participant = Participant.objects.select_for_update().get(pk=participant.pk)
+        if market.is_resolved:
+            return JsonResponse({"error": "This Beermarket has already been resolved."}, status=400)
+        if chips > participant.beer_chips:
+            return JsonResponse({"error": "You do not have that many Beer Chips."}, status=400)
+        participant.beer_chips -= chips
+        participant.save(update_fields=["beer_chips"])
+        MarketTrade.objects.create(market=market, participant=participant, outcome=outcome, chips=chips)
+    _activity(request, participant, f"market_trade_bought_{outcome}_{chips}")
     return _results_response(trip, participant=_participant_payload(participant))

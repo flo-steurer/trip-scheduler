@@ -6,7 +6,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.contrib.staticfiles import finders
 
-from .models import Availability, Bet, BetPrediction, Participant, Proposal, ProposalVote, Trip
+from .models import Availability, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
 from .services import idea_leaderboard, trip_results
 
 
@@ -41,6 +41,7 @@ class TripFormTests(TestCase):
     def test_stylesheet_and_script_are_discoverable_static_assets(self):
         self.assertIsNotNone(finders.find("scheduler/app.css"))
         self.assertIsNotNone(finders.find("scheduler/trip.js"))
+        self.assertIsNotNone(finders.find("scheduler/beermarket.js"))
 
     def test_trip_page_uses_absolute_static_asset_urls(self):
         trip = Trip.objects.create(
@@ -57,6 +58,19 @@ class TripFormTests(TestCase):
         self.assertIn("csrftoken", response.cookies)
         self.assertContains(response, 'data-collapsible="daily-overlap"')
         self.assertContains(response, 'data-collapsible="trip-ideas" open')
+
+    def test_beermarket_page_uses_its_static_script(self):
+        trip = Trip.objects.create(
+            title="Island escape",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 8),
+            minimum_duration_days=4,
+            ideal_duration_days=4,
+            maximum_duration_days=4,
+        )
+        response = self.client.get(reverse("beermarket", args=[trip.public_id]))
+        self.assertContains(response, "Beermarket")
+        self.assertContains(response, 'src="/static/scheduler/beermarket.js"')
 
     @override_settings(PUBLIC_BASE_URL="http://100.64.0.10:8000")
     def test_trip_page_uses_configured_public_share_url(self):
@@ -251,43 +265,48 @@ class LeaderboardPageTests(TestCase, TripFactoryMixin):
         self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
 
 
-class BeerBetTests(TestCase, TripFactoryMixin):
+class BeermarketTests(TestCase, TripFactoryMixin):
     def setUp(self):
         self.trip = self.make_trip()
-        self.bet = Bet.objects.create(trip=self.trip, question="Will Kai join the trip planning?")
-        self.url = reverse("bet_prediction_api", args=[self.trip.public_id, self.bet.id])
+        self.market = Market.objects.create(trip=self.trip, question="Will Kai join the trip planning?")
+        self.url = reverse("market_trade_api", args=[self.trip.public_id, self.market.id])
 
     def post_json(self, data):
         return self.client.post(self.url, data=json.dumps(data), content_type="application/json")
 
-    def test_participant_can_change_an_open_prediction_and_the_result_exposes_bets(self):
-        first = self.post_json({"name": "Maya", "prediction": "yes"})
+    def test_trade_deducts_chips_and_updates_market_odds_history(self):
+        first = self.post_json({"name": "Maya", "outcome": "yes", "chips": 3})
         self.assertEqual(first.status_code, 200)
-        self.assertEqual(BetPrediction.objects.get().prediction, "yes")
-        self.assertEqual(first.json()["results"]["bets"][0]["yes_count"], 1)
+        participant = Participant.objects.get()
+        self.assertEqual(participant.beer_chips, 7)
+        self.assertEqual(MarketTrade.objects.get().outcome, "yes")
+        market = first.json()["results"]["markets"][0]
+        self.assertEqual(market["yes_odds"], 57)
+        self.assertEqual(len(market["odds_history"]), 2)
 
-        changed = self.post_json({"name": "Maya", "prediction": "no"})
-        self.assertEqual(changed.status_code, 200)
-        self.assertEqual(BetPrediction.objects.count(), 1)
-        self.assertEqual(BetPrediction.objects.get().prediction, "no")
-        self.assertEqual(changed.json()["results"]["bets"][0]["no_count"], 1)
-
-    def test_settling_awards_correct_predictions_once_and_locks_the_bet(self):
+    def test_resolution_pays_the_pool_to_winners_and_locks_the_market(self):
         maya = self.person(self.trip, "Maya")
         ari = self.person(self.trip, "Ari")
-        BetPrediction.objects.create(bet=self.bet, participant=maya, prediction="yes")
-        BetPrediction.objects.create(bet=self.bet, participant=ari, prediction="no")
+        maya.beer_chips = 7
+        ari.beer_chips = 8
+        maya.save(update_fields=["beer_chips"])
+        ari.save(update_fields=["beer_chips"])
+        MarketTrade.objects.create(market=self.market, participant=maya, outcome="yes", chips=3)
+        MarketTrade.objects.create(market=self.market, participant=ari, outcome="no", chips=2)
 
-        self.assertEqual(self.bet.settle(Bet.Outcome.YES), 1)
+        self.assertEqual(self.market.resolve(Market.Outcome.YES), 1)
         maya.refresh_from_db()
         ari.refresh_from_db()
         self.assertEqual(maya.beer_karma_bonus, 1)
         self.assertEqual(ari.beer_karma_bonus, 0)
-        self.assertTrue(self.bet.is_settled)
+        self.assertEqual(maya.beer_chips, 12)
+        self.assertEqual(ari.beer_chips, 8)
+        self.assertTrue(self.market.is_resolved)
 
-        rejected = self.post_json({"name": "Maya", "prediction": "no"})
+        rejected = self.post_json({"name": "Maya", "outcome": "no", "chips": 1})
         self.assertEqual(rejected.status_code, 400)
-        self.assertEqual(trip_results(self.trip)["participants"][1]["beer_karma"], 1)
+        participants = {participant["name"]: participant for participant in trip_results(self.trip)["participants"]}
+        self.assertEqual(participants["Maya"]["beer_karma"], 1)
 
 
 class ProposalApiTests(TestCase, TripFactoryMixin):

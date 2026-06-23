@@ -1,4 +1,5 @@
 import uuid
+from collections import defaultdict
 from datetime import date
 
 from django.core.exceptions import ValidationError
@@ -60,6 +61,7 @@ class Participant(models.Model):
     normalized_name = models.CharField(max_length=80)
     minimum_attendance_days = models.PositiveSmallIntegerField(default=1)
     beer_karma_bonus = models.PositiveIntegerField(default=0)
+    beer_chips = models.PositiveIntegerField(default=10)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -144,60 +146,82 @@ class ProposalVote(models.Model):
             raise ValidationError({"participant": "Votes must come from a participant in the same trip."})
 
 
-class Bet(models.Model):
+class Market(models.Model):
     class Outcome(models.TextChoices):
         YES = "yes", "Yes"
         NO = "no", "No"
 
-    trip = models.ForeignKey(Trip, related_name="bets", on_delete=models.CASCADE)
+    trip = models.ForeignKey(Trip, related_name="markets", on_delete=models.CASCADE)
     question = models.CharField(max_length=240)
-    settled_outcome = models.CharField(max_length=3, choices=Outcome.choices, blank=True)
+    resolved_outcome = models.CharField(max_length=3, choices=Outcome.choices, blank=True)
+    seed_chips = models.PositiveSmallIntegerField(default=10)
     created_at = models.DateTimeField(auto_now_add=True)
-    settled_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
 
     @property
-    def is_settled(self):
-        return bool(self.settled_outcome)
+    def is_resolved(self):
+        return bool(self.resolved_outcome)
 
-    def settle(self, outcome):
+    @staticmethod
+    def payout_distribution(trades, outcome):
+        total_pool = sum(trade.chips for trade in trades)
+        winning_stakes = defaultdict(int)
+        for trade in trades:
+            if trade.outcome == outcome:
+                winning_stakes[trade.participant_id] += trade.chips
+        winning_pool = sum(winning_stakes.values())
+        if not winning_pool:
+            return {}
+
+        payouts = {}
+        remainders = []
+        for participant_id, stake in winning_stakes.items():
+            gross_payout = total_pool * stake
+            payouts[participant_id], remainder = divmod(gross_payout, winning_pool)
+            remainders.append((remainder, participant_id))
+        unallocated = total_pool - sum(payouts.values())
+        for _remainder, participant_id in sorted(remainders, key=lambda item: (-item[0], item[1]))[:unallocated]:
+            payouts[participant_id] += 1
+        return payouts
+
+    def resolve(self, outcome):
         if outcome not in self.Outcome.values:
-            raise ValidationError("Choose a valid bet outcome.")
+            raise ValidationError("Choose a valid market outcome.")
         with transaction.atomic():
-            bet = type(self).objects.select_for_update().get(pk=self.pk)
-            if bet.is_settled:
-                raise ValidationError("This bet has already been settled.")
-            winner_ids = list(
-                bet.predictions.filter(prediction=outcome).values_list("participant_id", flat=True)
-            )
-            Participant.objects.filter(pk__in=winner_ids).update(
-                beer_karma_bonus=models.F("beer_karma_bonus") + 1
-            )
-            bet.settled_outcome = outcome
-            bet.settled_at = timezone.now()
-            bet.save(update_fields=["settled_outcome", "settled_at"])
-        self.settled_outcome = bet.settled_outcome
-        self.settled_at = bet.settled_at
-        return len(winner_ids)
+            market = type(self).objects.select_for_update().get(pk=self.pk)
+            if market.is_resolved:
+                raise ValidationError("This market has already been resolved.")
+            trades = list(market.trades.select_for_update().all())
+            payouts = self.payout_distribution(trades, outcome)
+            for participant_id, payout in payouts.items():
+                Participant.objects.filter(pk=participant_id).update(
+                    beer_chips=models.F("beer_chips") + payout,
+                    beer_karma_bonus=models.F("beer_karma_bonus") + 1,
+                )
+            market.resolved_outcome = outcome
+            market.resolved_at = timezone.now()
+            market.save(update_fields=["resolved_outcome", "resolved_at"])
+        self.resolved_outcome = market.resolved_outcome
+        self.resolved_at = market.resolved_at
+        return len(payouts)
 
     def __str__(self):
         return self.question
 
 
-class BetPrediction(models.Model):
-    bet = models.ForeignKey(Bet, related_name="predictions", on_delete=models.CASCADE)
-    participant = models.ForeignKey(Participant, related_name="bet_predictions", on_delete=models.CASCADE)
-    prediction = models.CharField(max_length=3, choices=Bet.Outcome.choices)
+class MarketTrade(models.Model):
+    market = models.ForeignKey(Market, related_name="trades", on_delete=models.CASCADE)
+    participant = models.ForeignKey(Participant, related_name="market_trades", on_delete=models.CASCADE)
+    outcome = models.CharField(max_length=3, choices=Market.Outcome.choices)
+    chips = models.PositiveSmallIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        constraints = [
-            models.UniqueConstraint(fields=["bet", "participant"], name="unique_bet_prediction_per_participant"),
-        ]
+        ordering = ["created_at", "id"]
 
     def clean(self):
-        if self.bet_id and self.participant_id and self.bet.trip_id != self.participant.trip_id:
-            raise ValidationError({"participant": "Bets must come from a participant in the same trip."})
+        if self.market_id and self.participant_id and self.market.trip_id != self.participant.trip_id:
+            raise ValidationError({"participant": "Market trades must come from a participant in the same trip."})

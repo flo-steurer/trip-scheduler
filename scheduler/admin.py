@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 
-from .models import Availability, Bet, BetPrediction, Participant, Trip
+from .models import Availability, Market, MarketTrade, Participant, Trip
 
 
 class AvailabilityInline(admin.TabularInline):
@@ -20,44 +20,44 @@ class TripAdmin(admin.ModelAdmin):
 
 @admin.register(Participant)
 class ParticipantAdmin(admin.ModelAdmin):
-    list_display = ("name", "trip", "beer_karma_bonus", "created_at")
+    list_display = ("name", "trip", "beer_chips", "beer_karma_bonus", "created_at")
     search_fields = ("name",)
     list_select_related = ("trip",)
     inlines = [AvailabilityInline]
 
 
-class BetPredictionInline(admin.TabularInline):
-    model = BetPrediction
+class MarketTradeInline(admin.TabularInline):
+    model = MarketTrade
     extra = 0
-    readonly_fields = ("participant", "prediction", "created_at", "updated_at")
+    readonly_fields = ("participant", "outcome", "chips", "created_at")
     can_delete = False
 
 
-@admin.register(Bet)
-class BetAdmin(admin.ModelAdmin):
-    list_display = ("question", "trip", "settled_outcome", "created_at", "settled_at")
-    list_filter = ("settled_outcome", "trip")
+@admin.register(Market)
+class MarketAdmin(admin.ModelAdmin):
+    list_display = ("question", "trip", "resolved_outcome", "created_at", "resolved_at")
+    list_filter = ("resolved_outcome", "trip")
     search_fields = ("question",)
     list_select_related = ("trip",)
-    readonly_fields = ("settled_outcome", "settled_at")
-    inlines = [BetPredictionInline]
-    actions = ("settle_yes", "settle_no")
+    readonly_fields = ("resolved_outcome", "resolved_at")
+    inlines = [MarketTradeInline]
+    actions = ("resolve_yes", "resolve_no")
 
-    @admin.action(description="Settle selected bets: Yes wins (+1 Beer Karma)")
-    def settle_yes(self, request, queryset):
-        self._settle(request, queryset, Bet.Outcome.YES)
+    @admin.action(description="Resolve selected markets: Yes wins (pay chips + Beer Karma)")
+    def resolve_yes(self, request, queryset):
+        self._resolve(request, queryset, Market.Outcome.YES)
 
-    @admin.action(description="Settle selected bets: No wins (+1 Beer Karma)")
-    def settle_no(self, request, queryset):
-        self._settle(request, queryset, Bet.Outcome.NO)
+    @admin.action(description="Resolve selected markets: No wins (pay chips + Beer Karma)")
+    def resolve_no(self, request, queryset):
+        self._resolve(request, queryset, Market.Outcome.NO)
 
-    def _settle(self, request, queryset, outcome):
+    def _resolve(self, request, queryset, outcome):
         awarded = 0
-        settled = 0
-        for bet in queryset.filter(settled_outcome=""):
+        resolved = 0
+        for market in queryset.filter(resolved_outcome=""):
             try:
-                awarded += bet.settle(outcome)
-                settled += 1
+                awarded += market.resolve(outcome)
+                resolved += 1
             except ValidationError:
                 continue
-        self.message_user(request, f"Settled {settled} bet(s); awarded {awarded} Beer Karma point(s).")
+        self.message_user(request, f"Resolved {resolved} market(s); awarded Beer Karma to {awarded} winning trader(s).")

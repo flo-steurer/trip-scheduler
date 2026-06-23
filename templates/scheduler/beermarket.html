@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Beermarket · {{ trip.title }}{% endblock %}
+{% block header_action %}<a class="text-link" href="{% url 'trip_detail' trip.public_id %}">Back to trip</a>{% endblock %}
+{% block content %}
+<div class="shell market-shell" id="market-app"
+     data-trip-id="{{ trip.public_id }}"
+     data-participant-url="{% url 'participant_api' trip.public_id %}"
+     data-results-url="{% url 'results_api' trip.public_id %}"
+     data-trade-url="{% url 'market_trade_api' trip.public_id 0 %}">
+  <div hidden>{% csrf_token %}</div>
+  <section class="market-heading">
+    <p class="eyebrow">Prediction market</p>
+    <h1>Beermarket</h1>
+    <p>Back your trip predictions with pretend Beer Chips. Prices move with every trade; winning positions pay the pool and earn Beer Karma.</p>
+  </section>
+
+  <section class="market-account card" aria-labelledby="market-account-title">
+    <div><p class="eyebrow">Your trading desk</p><h2 id="market-account-title">Pick your name</h2></div>
+    <div class="market-account-controls"><label for="market-name">Name<input id="market-name" maxlength="80" autocomplete="name" placeholder="e.g. Sam"></label><button id="market-save-name" class="button small" type="button">Save</button><output id="market-balance">10 Beer Chips</output></div>
+    <span id="market-state" class="save-state" aria-live="polite"></span>
+  </section>
+
+  <section class="market-list" aria-labelledby="markets-title">
+    <div class="market-list-heading"><div><p class="eyebrow">Live markets</p><h2 id="markets-title">What does the group think?</h2></div><button id="market-refresh" class="text-button" type="button">Refresh odds</button></div>
+    <p class="help">Markets are created and resolved by the trip organizer in Django admin. Beer Chips have no real-world value.</p>
+    <div id="market-board"></div>
+  </section>
+</div>
+{{ initial_results|json_script:"initial-market-results" }}
+<script src="{% static 'scheduler/beermarket.js' %}"></script>
+{% endblock %}

@@ -14,7 +14,6 @@
   const proposalSummary = document.querySelector('#proposal-summary');
   const proposalSubmit = document.querySelector('#proposal-submit');
   const proposalCancel = document.querySelector('#proposal-cancel');
-  const betState = document.querySelector('#bet-state');
   const storageKey = `trip-scheduler:${app.dataset.tripId}:name`;
   let results = initialResults;
   let submitting = false;
@@ -40,11 +39,6 @@
   function setProposalState(message, error = false) {
     proposalState.textContent = message;
     proposalState.classList.toggle('error', error);
-  }
-
-  function setBetState(message, error = false) {
-    betState.textContent = message;
-    betState.classList.toggle('error', error);
   }
 
   function minimumAttendanceLabel(value) {
@@ -284,7 +278,6 @@
     renderMinimumAttendance();
     renderPeople();
     renderProposals();
-    renderBets();
   }
 
   function renderPeople() {
@@ -311,10 +304,6 @@
 
   function proposalUrl(id) {
     return `${app.dataset.proposalsUrl}${id}/`;
-  }
-
-  function betUrl(id) {
-    return app.dataset.betUrl.replace('/0/', `/${id}/`);
   }
 
   function hasUpvoted(proposal) {
@@ -344,48 +333,6 @@
       proposals.forEach((proposal) => cards.append(proposalCard(proposal)));
       group.append(cards); board.append(group);
     });
-  }
-
-  function ownBetPrediction(bet) {
-    const name = currentName().toLocaleLowerCase();
-    return bet.predictions.find((prediction) => prediction.name.toLocaleLowerCase() === name)?.prediction || null;
-  }
-
-  function renderBets() {
-    const board = document.querySelector('#bet-board'); board.replaceChildren();
-    const openBets = results.bets.filter((bet) => !bet.is_settled);
-    document.querySelector('#bet-summary').textContent = `${openBets.length} open bet${openBets.length === 1 ? '' : 's'}`;
-    if (!results.bets.length) {
-      const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No Beer Bets yet. The organizer can add one in the backend.'; board.append(empty); return;
-    }
-    results.bets.forEach((bet) => board.append(betCard(bet)));
-  }
-
-  function betCard(bet) {
-    const card = document.createElement('article'); card.className = `bet-card${bet.is_settled ? ' settled' : ''}`;
-    const heading = document.createElement('div'); heading.className = 'bet-card-heading';
-    const question = document.createElement('h3'); question.textContent = bet.question;
-    const status = document.createElement('span'); status.className = `bet-status${bet.is_settled ? ' settled' : ''}`;
-    status.textContent = bet.is_settled ? `Settled: ${bet.settled_outcome === 'yes' ? 'Yes' : 'No'}` : 'Open';
-    heading.append(question, status); card.append(heading);
-    const counts = document.createElement('p'); counts.className = 'bet-counts'; counts.textContent = `${bet.yes_count} Yes · ${bet.no_count} No · ${bet.prediction_count} prediction${bet.prediction_count === 1 ? '' : 's'}`; card.append(counts);
-    if (bet.predictions.length) {
-      const picks = document.createElement('p'); picks.className = 'bet-picks';
-      picks.textContent = bet.predictions.map((prediction) => `${prediction.name}: ${prediction.prediction === 'yes' ? 'Yes' : 'No'}${prediction.won ? ' ✦' : ''}`).join(' · ');
-      card.append(picks);
-    }
-    if (!bet.is_settled) {
-      const actions = document.createElement('div'); actions.className = 'bet-actions';
-      const ownPrediction = ownBetPrediction(bet);
-      ['yes', 'no'].forEach((prediction) => {
-        const button = document.createElement('button'); button.type = 'button';
-        button.className = `bet-button ${prediction}${ownPrediction === prediction ? ' selected' : ''}`;
-        button.textContent = ownPrediction === prediction ? `${prediction === 'yes' ? 'Yes' : 'No'} ✓` : prediction === 'yes' ? 'Bet Yes' : 'Bet No';
-        button.addEventListener('click', () => placeBet(bet, prediction)); actions.append(button);
-      });
-      card.append(actions);
-    }
-    return card;
   }
 
   function proposalCard(proposal) {
@@ -475,17 +422,6 @@
       if (editingProposalId === proposal.id) resetProposalForm();
       renderResults(); setProposalState('Deleted');
     } catch (error) { setProposalState(error.message, true); }
-    finally { submitting = false; }
-  }
-
-  async function placeBet(bet, prediction) {
-    if (!currentName()) { setBetState('Save your name before placing a bet.', true); nameInput.focus(); return; }
-    if (submitting) return;
-    submitting = true; setBetState('Placing bet…');
-    try {
-      const data = await request(betUrl(bet.id), { name: currentName(), prediction });
-      results = data.results; renderResults(); setBetState('Bet placed');
-    } catch (error) { setBetState(error.message, true); }
     finally { submitting = false; }
   }
 
