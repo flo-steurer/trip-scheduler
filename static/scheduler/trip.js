@@ -116,11 +116,14 @@
       const scores = document.createElement('div'); scores.className = 'window-scores';
       scores.append(badge('yes', window.confirmed_count, 'available'));
       if (window.possible_count) scores.append(badge('maybe', window.possible_count, 'maybe'));
+      scores.append(badge('available days', window.available_person_days, 'available'));
+      if (window.maybe_person_days) scores.append(badge('maybe days', window.maybe_person_days, 'maybe'));
       details.append(title, scores);
       const names = document.createElement('p'); names.className = 'window-names';
       const confirmed = window.confirmed.length ? `In: ${window.confirmed.join(', ')}` : 'No confirmed attendees yet';
       const possible = window.possible.length ? ` · Maybe: ${window.possible.join(', ')}` : '';
-      names.textContent = confirmed + possible;
+      const partial = window.partial.length ? ` · Partial: ${window.partial.map((person) => `${person.name} (${person.available_days} days)`).join(', ')}` : '';
+      names.textContent = confirmed + possible + partial;
       details.append(names); card.append(rank, details); windows.append(card);
     });
 

@@ -106,6 +106,23 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(window["confirmed"], [])
         self.assertEqual(window["possible"], [])
 
+    def test_partial_attendance_improves_a_window_overall_rank(self):
+        trip = self.make_trip(
+            start_date=date(2026, 9, 3),
+            end_date=date(2026, 9, 11),
+            duration_days=7,
+        )
+        full_range = {date(2026, 9, day): "available" for day in range(3, 12)}
+        self.person(trip, "Flo", full_range)
+        self.person(trip, "Max", full_range)
+        self.person(trip, "Vivienne", full_range)
+        self.person(trip, "Alex", {date(2026, 9, day): "available" for day in range(8, 12)})
+
+        windows = trip_results(trip)["windows"]
+        self.assertEqual(windows[0]["start_date"], "2026-09-05")
+        self.assertEqual(windows[0]["available_person_days"], 25)
+        self.assertEqual(windows[0]["partial"], [{"name": "Alex", "available_days": 4, "maybe_days": 0}])
+
 
 class AvailabilityApiTests(TestCase, TripFactoryMixin):
     def setUp(self):

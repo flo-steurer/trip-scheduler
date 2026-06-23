@@ -29,13 +29,25 @@ def trip_results(trip):
     windows = []
     for offset in range(len(days) - trip.duration_days + 1):
         window_days = days[offset:offset + trip.duration_days]
-        confirmed, possible = [], []
+        confirmed, possible, partial = [], [], []
+        available_person_days = 0
+        maybe_person_days = 0
         for participant in participants:
             statuses = [status_by_person[participant.id].get(day, "unmarked") for day in window_days]
+            available_days = statuses.count(Availability.Status.AVAILABLE)
+            maybe_days = statuses.count(Availability.Status.MAYBE)
+            available_person_days += available_days
+            maybe_person_days += maybe_days
             if all(status == Availability.Status.AVAILABLE for status in statuses):
                 confirmed.append(participant.name)
             elif all(status in (Availability.Status.AVAILABLE, Availability.Status.MAYBE) for status in statuses):
                 possible.append(participant.name)
+            elif available_days or maybe_days:
+                partial.append({
+                    "name": participant.name,
+                    "available_days": available_days,
+                    "maybe_days": maybe_days,
+                })
         windows.append({
             "start_date": window_days[0].isoformat(),
             "end_date": window_days[-1].isoformat(),
@@ -43,8 +55,18 @@ def trip_results(trip):
             "possible": possible,
             "confirmed_count": len(confirmed),
             "possible_count": len(possible),
+            "partial": partial,
+            "available_person_days": available_person_days,
+            "maybe_person_days": maybe_person_days,
+            # Use integer half-points: available days are worth 2, maybe days 1.
+            "attendance_score": available_person_days * 2 + maybe_person_days,
         })
-    windows.sort(key=lambda item: (-item["confirmed_count"], -item["possible_count"], item["start_date"]))
+    windows.sort(key=lambda item: (
+        -item["attendance_score"],
+        -item["available_person_days"],
+        -item["confirmed_count"],
+        item["start_date"],
+    ))
 
     return {
         "daily": daily,
