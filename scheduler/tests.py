@@ -286,6 +286,7 @@ class AvailabilityApiTests(TestCase, TripFactoryMixin):
     def setUp(self):
         self.trip = self.make_trip(end_date=date(2026, 7, 3))
         self.url = reverse("availability_api", args=[self.trip.public_id])
+        self.range_url = reverse("availability_range_api", args=[self.trip.public_id])
 
     def post_json(self, data):
         return self.client.post(self.url, data=json.dumps(data), content_type="application/json")
@@ -308,6 +309,27 @@ class AvailabilityApiTests(TestCase, TripFactoryMixin):
         self.assertEqual(invalid_status.status_code, 400)
         self.assertEqual(outside_range.status_code, 400)
         self.assertEqual(Availability.objects.count(), 0)
+
+    def test_applies_and_clears_a_contiguous_availability_range(self):
+        applied = self.client.post(self.range_url, data=json.dumps({
+            "name": "Maya", "start_date": "2026-07-01", "end_date": "2026-07-03", "status": "available",
+        }), content_type="application/json")
+        self.assertEqual(applied.status_code, 200)
+        self.assertEqual(Availability.objects.count(), 3)
+        self.assertEqual({availability.status for availability in Availability.objects.all()}, {"available"})
+
+        cleared = self.client.post(self.range_url, data=json.dumps({
+            "name": "Maya", "start_date": "2026-07-02", "end_date": "2026-07-03", "status": "unmarked",
+        }), content_type="application/json")
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(list(Availability.objects.values_list("date", flat=True)), [date(2026, 7, 1)])
+
+    def test_normalizes_a_backward_availability_range(self):
+        response = self.client.post(self.range_url, data=json.dumps({
+            "name": "Maya", "start_date": "2026-07-03", "end_date": "2026-07-01", "status": "available",
+        }), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Availability.objects.count(), 3)
 
     def test_participant_endpoint_returns_existing_person_and_results(self):
         url = reverse("participant_api", args=[self.trip.public_id])

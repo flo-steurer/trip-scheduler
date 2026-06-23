@@ -18,6 +18,8 @@
   let results = initialResults;
   let submitting = false;
   let editingProposalId = null;
+  let rangeGesture = null;
+  let suppressNextCalendarClick = false;
 
   const csrfToken = () => document.querySelector('[name="csrfmiddlewaretoken"]')?.value || '';
   const isoDate = (value) => value.toISOString().slice(0, 10);
@@ -86,6 +88,81 @@
     return months;
   }
 
+  function nextStatus(status) {
+    return stateCycle[(stateCycle.indexOf(status) + 1) % stateCycle.length];
+  }
+
+  function dateAtPoint(clientX, clientY) {
+    return document.elementFromPoint(clientX, clientY)?.closest('.date-button')?.dataset.date || null;
+  }
+
+  function previewRange(startDate, endDate) {
+    const first = startDate < endDate ? startDate : endDate;
+    const last = startDate < endDate ? endDate : startDate;
+    document.querySelectorAll('.date-button').forEach((button) => {
+      button.classList.toggle('range-preview', button.dataset.date >= first && button.dataset.date <= last);
+    });
+  }
+
+  function clearRangePreview() {
+    document.querySelectorAll('.date-button.range-preview').forEach((button) => button.classList.remove('range-preview'));
+  }
+
+  function startRangeGesture(event, startDate) {
+    if (submitting || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    rangeGesture = {
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      startDate,
+      endDate: startDate,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      timer: null,
+    };
+    if (event.pointerType === 'touch') {
+      rangeGesture.timer = window.setTimeout(() => {
+        if (!rangeGesture || rangeGesture.pointerId !== event.pointerId) return;
+        rangeGesture.active = true;
+        previewRange(rangeGesture.startDate, rangeGesture.endDate);
+        setSaveState('Drag across dates, then release to apply.');
+      }, 350);
+    }
+  }
+
+  function finishRangeGesture(event, cancelled = false) {
+    if (!rangeGesture || rangeGesture.pointerId !== event.pointerId) return;
+    window.clearTimeout(rangeGesture.timer);
+    const gesture = rangeGesture;
+    rangeGesture = null;
+    if (!gesture.active || cancelled) { clearRangePreview(); return; }
+    suppressNextCalendarClick = true;
+    window.setTimeout(() => { suppressNextCalendarClick = false; }, 0);
+    clearRangePreview();
+    updateDateRange(gesture.startDate, gesture.endDate);
+  }
+
+  function handleRangePointerMove(event) {
+    if (!rangeGesture || rangeGesture.pointerId !== event.pointerId) return;
+    const selectedDate = dateAtPoint(event.clientX, event.clientY);
+    const movedEnough = Math.hypot(event.clientX - rangeGesture.startX, event.clientY - rangeGesture.startY) > 10;
+    if (!rangeGesture.active) {
+      if (rangeGesture.pointerType === 'touch' && movedEnough) {
+        window.clearTimeout(rangeGesture.timer);
+        rangeGesture = null;
+        return;
+      }
+      if (rangeGesture.pointerType !== 'touch' && selectedDate && selectedDate !== rangeGesture.startDate) {
+        rangeGesture.active = true;
+        setSaveState('Release to apply this range.');
+      }
+    }
+    if (!rangeGesture?.active || !selectedDate) return;
+    rangeGesture.endDate = selectedDate;
+    previewRange(rangeGesture.startDate, selectedDate);
+    event.preventDefault();
+  }
+
   function renderCalendar() {
     calendar.replaceChildren();
     const start = app.dataset.startDate;
@@ -119,7 +196,15 @@
         button.dataset.status = status;
         button.textContent = day;
         button.setAttribute('aria-label', `${readableDate(iso)}: ${status}`);
-        button.addEventListener('click', () => updateDate(iso, status));
+        button.addEventListener('pointerdown', (event) => startRangeGesture(event, iso));
+        button.addEventListener('click', (event) => {
+          if (suppressNextCalendarClick) {
+            suppressNextCalendarClick = false;
+            event.preventDefault();
+            return;
+          }
+          updateDate(iso, status);
+        });
         grid.append(button);
       }
       month.append(grid);
@@ -348,14 +433,37 @@
     const name = currentName();
     if (!name) { setSaveState('Enter and save your name before marking dates.', true); nameInput.focus(); return; }
     if (submitting) return;
-    const nextStatus = stateCycle[(stateCycle.indexOf(currentStatus) + 1) % stateCycle.length];
+    const newStatus = nextStatus(currentStatus);
     submitting = true; setSaveState('Saving…');
     try {
-      const data = await request(app.dataset.availabilityUrl, { name, date, status: nextStatus });
+      const data = await request(app.dataset.availabilityUrl, { name, date, status: newStatus });
       nameInput.value = data.participant.name;
       localStorage.setItem(storageKey, data.participant.name);
       results = data.results;
       renderCalendar(); renderResults(); setSaveState('Saved');
+    } catch (error) { setSaveState(error.message, true); }
+    finally { submitting = false; }
+  }
+
+  async function updateDateRange(startDate, endDate) {
+    const name = currentName();
+    if (!name) { setSaveState('Enter and save your name before marking dates.', true); nameInput.focus(); return; }
+    if (submitting) return;
+    const rangeStart = startDate < endDate ? startDate : endDate;
+    const rangeEnd = startDate < endDate ? endDate : startDate;
+    const newStatus = nextStatus(statusFor(startDate));
+    submitting = true; setSaveState(`Applying ${readableDate(rangeStart)} – ${readableDate(rangeEnd)}…`);
+    try {
+      const data = await request(app.dataset.availabilityRangeUrl, {
+        name,
+        start_date: rangeStart,
+        end_date: rangeEnd,
+        status: newStatus,
+      });
+      nameInput.value = data.participant.name;
+      localStorage.setItem(storageKey, data.participant.name);
+      results = data.results;
+      renderCalendar(); renderResults(); setSaveState('Saved range');
     } catch (error) { setSaveState(error.message, true); }
     finally { submitting = false; }
   }
@@ -389,6 +497,9 @@
   nameInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); saveName(); } });
   minimumAttendanceInput.addEventListener('input', () => { minimumAttendanceValue.textContent = minimumAttendanceLabel(minimumAttendanceInput.value); });
   minimumAttendanceInput.addEventListener('change', updateMinimumAttendance);
+  document.addEventListener('pointermove', handleRangePointerMove, { passive: false });
+  document.addEventListener('pointerup', (event) => finishRangeGesture(event));
+  document.addEventListener('pointercancel', (event) => finishRangeGesture(event, true));
   proposalForm.addEventListener('submit', submitProposal);
   proposalCancel.addEventListener('click', resetProposalForm);
   document.querySelector('#copy-link').addEventListener('click', async (event) => {

@@ -1,11 +1,11 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 from urllib.parse import urljoin
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -175,6 +175,44 @@ def availability_api(request, public_id):
     else:
         return JsonResponse({"error": "Unknown availability status."}, status=400)
 
+    return _results_response(trip, participant=_participant_payload(participant))
+
+
+@require_POST
+def availability_range_api(request, public_id):
+    trip = _trip(public_id)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    try:
+        start_date = date.fromisoformat(body.get("start_date", ""))
+        end_date = date.fromisoformat(body.get("end_date", ""))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Enter a valid date range."}, status=400)
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    if start_date < trip.start_date or end_date > trip.end_date:
+        return JsonResponse({"error": "That range is outside the candidate dates."}, status=400)
+
+    status = body.get("status")
+    valid_statuses = {choice for choice, _label in Availability.Status.choices}
+    if status in (None, "unmarked"):
+        Availability.objects.filter(participant=participant, date__range=(start_date, end_date)).delete()
+    elif status in valid_statuses:
+        with transaction.atomic():
+            selected_day = start_date
+            while selected_day <= end_date:
+                Availability.objects.update_or_create(
+                    participant=participant,
+                    date=selected_day,
+                    defaults={"status": status},
+                )
+                selected_day += timedelta(days=1)
+    else:
+        return JsonResponse({"error": "Unknown availability status."}, status=400)
     return _results_response(trip, participant=_participant_payload(participant))
 
 

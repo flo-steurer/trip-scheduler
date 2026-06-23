@@ -7,6 +7,7 @@
      data-trip-id="{{ trip.public_id }}"
      data-participant-url="{% url 'participant_api' trip.public_id %}"
      data-availability-url="{% url 'availability_api' trip.public_id %}"
+     data-availability-range-url="{% url 'availability_range_api' trip.public_id %}"
      data-results-url="{% url 'results_api' trip.public_id %}"
      data-proposals-url="{% url 'proposal_collection_api' trip.public_id %}"
      data-start-date="{{ trip.start_date|date:'Y-m-d' }}"
