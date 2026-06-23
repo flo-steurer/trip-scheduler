@@ -11,7 +11,9 @@ class Trip(models.Model):
     destination = models.CharField(max_length=120, blank=True)
     start_date = models.DateField()
     end_date = models.DateField()
-    duration_days = models.PositiveSmallIntegerField()
+    minimum_duration_days = models.PositiveSmallIntegerField()
+    ideal_duration_days = models.PositiveSmallIntegerField()
+    maximum_duration_days = models.PositiveSmallIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -21,16 +23,31 @@ class Trip(models.Model):
         errors = {}
         if self.start_date and self.end_date and self.end_date < self.start_date:
             errors["end_date"] = "The end date must be on or after the start date."
-        if self.start_date and self.end_date and self.duration_days:
+        if self.start_date and self.end_date:
             total_days = (self.end_date - self.start_date).days + 1
-            if self.duration_days > total_days:
-                errors["duration_days"] = "The trip length cannot exceed the candidate date range."
+            durations = {
+                "minimum_duration_days": self.minimum_duration_days,
+                "ideal_duration_days": self.ideal_duration_days,
+                "maximum_duration_days": self.maximum_duration_days,
+            }
+            for field, duration in durations.items():
+                if duration and duration > total_days:
+                    errors[field] = "The trip length cannot exceed the candidate date range."
+            if self.minimum_duration_days and self.ideal_duration_days and self.maximum_duration_days:
+                if not self.minimum_duration_days <= self.ideal_duration_days <= self.maximum_duration_days:
+                    errors["ideal_duration_days"] = "Choose durations in order: minimum, ideal, then maximum."
         if errors:
             raise ValidationError(errors)
 
     @property
     def candidate_days(self):
         return (self.end_date - self.start_date).days + 1
+
+    @property
+    def duration_summary(self):
+        if self.minimum_duration_days == self.maximum_duration_days:
+            return f"{self.minimum_duration_days} day{'s' if self.minimum_duration_days != 1 else ''}"
+        return f"{self.minimum_duration_days}–{self.maximum_duration_days} days (ideal {self.ideal_duration_days})"
 
     def __str__(self):
         return self.title

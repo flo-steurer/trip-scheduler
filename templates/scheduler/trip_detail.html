@@ -11,13 +11,15 @@
      data-proposals-url="{% url 'proposal_collection_api' trip.public_id %}"
      data-start-date="{{ trip.start_date|date:'Y-m-d' }}"
      data-end-date="{{ trip.end_date|date:'Y-m-d' }}"
-     data-duration="{{ trip.duration_days }}">
+     data-minimum-duration="{{ trip.minimum_duration_days }}"
+     data-ideal-duration="{{ trip.ideal_duration_days }}"
+     data-maximum-duration="{{ trip.maximum_duration_days }}">
   <div hidden>{% csrf_token %}</div>
   <section class="trip-heading">
     <div>
       <p class="eyebrow">Shared trip calendar</p>
       <h1>{{ trip.title }}</h1>
-      <p class="trip-meta">{% if trip.destination %}{{ trip.destination }} · {% endif %}{{ trip.start_date|date:"M j" }} – {{ trip.end_date|date:"M j, Y" }} <span>·</span> {{ trip.duration_days }} day{{ trip.duration_days|pluralize }}</p>
+      <p class="trip-meta">{% if trip.destination %}{{ trip.destination }} · {% endif %}{{ trip.start_date|date:"M j" }} – {{ trip.end_date|date:"M j, Y" }} <span>·</span> {{ trip.duration_summary }}</p>
     </div>
     <div class="share-box">
       <span>Share this link</span>
@@ -46,7 +48,7 @@
     <aside class="card results-card" aria-labelledby="best-dates-title">
       <p class="eyebrow">Group overlap</p>
       <h2 id="best-dates-title">Best dates</h2>
-      <p class="help">Ranked by total attendance across every day. A “maybe” counts as half an available day.</p>
+      <p class="help">Across {{ trip.minimum_duration_days }}–{{ trip.maximum_duration_days }} days, ranked by attendance rate. A “maybe” counts as half a day; a strong attendee can make at least 75% of the trip. Your {{ trip.ideal_duration_days }}-day ideal breaks ties.</p>
       <div id="best-windows" class="best-windows"></div>
     </aside>
   </div>

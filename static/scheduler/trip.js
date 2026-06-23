@@ -113,7 +113,7 @@
   function renderResults() {
     const windows = document.querySelector('#best-windows');
     windows.replaceChildren();
-    const topWindows = results.windows.slice(0, 3);
+    const topWindows = results.windows.slice(0, 5);
     if (!results.participants.length) {
       const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'Waiting for the first response.'; windows.append(empty);
     }
@@ -122,8 +122,10 @@
       const rank = document.createElement('span'); rank.className = 'rank'; rank.textContent = String(index + 1).padStart(2, '0');
       const details = document.createElement('div');
       const title = document.createElement('h3');
-      title.textContent = `${readableDate(window.start_date)} – ${readableDate(window.end_date)}`;
+      title.textContent = `${readableDate(window.start_date)} – ${readableDate(window.end_date)} · ${window.duration_days} days`;
       const scores = document.createElement('div'); scores.className = 'window-scores';
+      scores.append(badge('attendance', `${window.attendance_rate}%`, 'available'));
+      scores.append(badge('strong attendees', window.strong_attendee_count, 'available'));
       scores.append(badge('yes', window.confirmed_count, 'available'));
       if (window.possible_count) scores.append(badge('maybe', window.possible_count, 'maybe'));
       scores.append(badge('available days', window.available_person_days, 'available'));

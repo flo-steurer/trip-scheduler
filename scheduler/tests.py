@@ -16,8 +16,17 @@ class TripFactoryMixin:
             "title": "Lake weekend",
             "start_date": date(2026, 7, 1),
             "end_date": date(2026, 7, 5),
-            "duration_days": 2,
+            "minimum_duration_days": 2,
+            "ideal_duration_days": 2,
+            "maximum_duration_days": 2,
         }
+        duration_days = overrides.pop("duration_days", None)
+        if duration_days is not None:
+            values.update({
+                "minimum_duration_days": duration_days,
+                "ideal_duration_days": duration_days,
+                "maximum_duration_days": duration_days,
+            })
         values.update(overrides)
         return Trip.objects.create(**values)
 
@@ -38,7 +47,9 @@ class TripFormTests(TestCase):
             title="Island escape",
             start_date=date(2026, 8, 1),
             end_date=date(2026, 8, 8),
-            duration_days=4,
+            minimum_duration_days=4,
+            ideal_duration_days=4,
+            maximum_duration_days=4,
         )
         response = self.client.get(reverse("trip_detail", args=[trip.public_id]))
         self.assertContains(response, 'href="/static/scheduler/app.css"')
@@ -51,7 +62,9 @@ class TripFormTests(TestCase):
             title="Island escape",
             start_date=date(2026, 8, 1),
             end_date=date(2026, 8, 8),
-            duration_days=4,
+            minimum_duration_days=4,
+            ideal_duration_days=4,
+            maximum_duration_days=4,
         )
         response = self.client.get(reverse("trip_detail", args=[trip.public_id]))
         self.assertContains(response, f'value="http://100.64.0.10:8000/trips/{trip.public_id}/"')
@@ -62,7 +75,9 @@ class TripFormTests(TestCase):
             "destination": "Mallorca",
             "start_date": "2026-08-01",
             "end_date": "2026-08-08",
-            "duration_days": 4,
+            "minimum_duration_days": 3,
+            "ideal_duration_days": 4,
+            "maximum_duration_days": 5,
         })
         trip = Trip.objects.get()
         self.assertRedirects(response, reverse("trip_detail", args=[trip.public_id]))
@@ -73,11 +88,25 @@ class TripFormTests(TestCase):
             "title": "Too long",
             "start_date": "2026-08-01",
             "end_date": "2026-08-02",
-            "duration_days": 3,
+            "minimum_duration_days": 1,
+            "ideal_duration_days": 3,
+            "maximum_duration_days": 3,
         })
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Trip.objects.count(), 0)
         self.assertContains(response, "cannot exceed", status_code=400)
+
+    def test_create_trip_requires_ordered_duration_range(self):
+        response = self.client.post(reverse("create_trip"), {
+            "title": "Out of order",
+            "start_date": "2026-08-01",
+            "end_date": "2026-08-12",
+            "minimum_duration_days": 8,
+            "ideal_duration_days": 7,
+            "maximum_duration_days": 10,
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "minimum, ideal, then maximum", status_code=400)
 
 
 class ResultsTests(TestCase, TripFactoryMixin):
@@ -122,6 +151,38 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(windows[0]["start_date"], "2026-09-05")
         self.assertEqual(windows[0]["available_person_days"], 25)
         self.assertEqual(windows[0]["partial"], [{"name": "Alex", "available_days": 4, "maybe_days": 0}])
+
+    def test_variable_durations_prefer_ideal_when_attendance_rates_tie(self):
+        trip = self.make_trip(
+            end_date=date(2026, 7, 5),
+            minimum_duration_days=2,
+            ideal_duration_days=3,
+            maximum_duration_days=4,
+        )
+        self.person(trip, "Ari", {date(2026, 7, day): "available" for day in range(1, 6)})
+        self.person(trip, "Bea", {date(2026, 7, day): "available" for day in range(1, 6)})
+
+        windows = trip_results(trip)["windows"]
+        self.assertEqual(windows[0]["duration_days"], 3)
+        self.assertEqual(windows[0]["attendance_rate"], 100)
+        self.assertEqual(windows[0]["strong_attendee_count"], 2)
+        self.assertEqual({window["duration_days"] for window in windows}, {2, 3, 4})
+
+    def test_normalized_attendance_rate_prevents_longer_windows_from_auto_winning(self):
+        trip = self.make_trip(
+            end_date=date(2026, 7, 4),
+            minimum_duration_days=2,
+            ideal_duration_days=3,
+            maximum_duration_days=3,
+        )
+        self.person(trip, "Ari", {date(2026, 7, day): "available" for day in range(1, 5)})
+        self.person(trip, "Bea", {date(2026, 7, day): "available" for day in (1, 2)})
+
+        windows = trip_results(trip)["windows"]
+        self.assertEqual(windows[0]["duration_days"], 2)
+        self.assertEqual(windows[0]["attendance_rate"], 100)
+        self.assertEqual(windows[1]["duration_days"], 3)
+        self.assertLess(windows[1]["attendance_rate"], windows[0]["attendance_rate"])
 
     def test_proposals_are_ranked_by_upvotes_and_expose_voters(self):
         trip = self.make_trip()

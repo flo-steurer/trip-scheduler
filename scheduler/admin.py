@@ -10,7 +10,10 @@ class AvailabilityInline(admin.TabularInline):
 
 @admin.register(Trip)
 class TripAdmin(admin.ModelAdmin):
-    list_display = ("title", "destination", "start_date", "end_date", "duration_days", "created_at")
+    list_display = (
+        "title", "destination", "start_date", "end_date",
+        "minimum_duration_days", "ideal_duration_days", "maximum_duration_days", "created_at",
+    )
     search_fields = ("title", "destination")
 
 
@@ -20,4 +23,3 @@ class ParticipantAdmin(admin.ModelAdmin):
     search_fields = ("name",)
     list_select_related = ("trip",)
     inlines = [AvailabilityInline]
-

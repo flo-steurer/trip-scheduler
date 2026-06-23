@@ -22,7 +22,15 @@
       <label class="wide">Destination <span class="optional">optional</span>{{ form.destination }}{% for error in form.destination.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
       <label>Dates from {{ form.start_date }}{% for error in form.start_date.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
       <label>to {{ form.end_date }}{% for error in form.end_date.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
-      <label class="wide">Preferred trip length (days) {{ form.duration_days }}{% for error in form.duration_days.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+      <fieldset class="wide duration-fields">
+        <legend>Trip length (days)</legend>
+        <p>Set a range; the calendar will surface the best trade-offs, preferring your ideal length when attendance is equal.</p>
+        <div>
+          <label>Minimum {{ form.minimum_duration_days }}{% for error in form.minimum_duration_days.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+          <label>Ideal {{ form.ideal_duration_days }}{% for error in form.ideal_duration_days.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+          <label>Maximum {{ form.maximum_duration_days }}{% for error in form.maximum_duration_days.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+        </div>
+      </fieldset>
       <button class="button wide" type="submit">Create and get a link <span>→</span></button>
     </form>
   </section>
