@@ -149,8 +149,10 @@
     if (!rangeGesture.active) {
       if (rangeGesture.pointerType === 'touch' && movedEnough) {
         window.clearTimeout(rangeGesture.timer);
-        rangeGesture = null;
-        return;
+        if (selectedDate && selectedDate !== rangeGesture.startDate) {
+          rangeGesture.active = true;
+          setSaveState('Release to apply this range.');
+        }
       }
       if (rangeGesture.pointerType !== 'touch' && selectedDate && selectedDate !== rangeGesture.startDate) {
         rangeGesture.active = true;

@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date, timedelta
 from urllib.parse import urljoin
 
@@ -14,6 +15,9 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from .forms import TripForm
 from .models import Availability, Participant, Proposal, ProposalVote, Trip
 from .services import trip_results
+
+
+activity_logger = logging.getLogger("scheduler.activity")
 
 
 def _trip(public_id):
@@ -67,6 +71,15 @@ def _participant_payload(participant):
         "name": participant.name,
         "minimum_attendance_days": participant.minimum_attendance_days,
     }
+
+
+def _activity(request, participant, action):
+    activity_logger.info(
+        "activity name=%r ip=%s action=%s",
+        participant.name,
+        request.META.get("REMOTE_ADDR", "unknown"),
+        action,
+    )
 
 
 def _results_response(trip, **extra):
@@ -146,6 +159,9 @@ def participant_api(request, public_id):
     if minimum_days is not None and participant.minimum_attendance_days != minimum_days:
         participant.minimum_attendance_days = minimum_days
         participant.save(update_fields=["minimum_attendance_days"])
+        _activity(request, participant, "minimum_attendance_updated")
+    else:
+        _activity(request, participant, "participant_saved")
     return _results_response(trip, participant=_participant_payload(participant))
 
 
@@ -174,7 +190,7 @@ def availability_api(request, public_id):
         Availability.objects.update_or_create(participant=participant, date=selected_day, defaults={"status": status})
     else:
         return JsonResponse({"error": "Unknown availability status."}, status=400)
-
+    _activity(request, participant, f"availability_set_{status or 'unmarked'}")
     return _results_response(trip, participant=_participant_payload(participant))
 
 
@@ -213,6 +229,7 @@ def availability_range_api(request, public_id):
                 selected_day += timedelta(days=1)
     else:
         return JsonResponse({"error": "Unknown availability status."}, status=400)
+    _activity(request, participant, f"availability_range_set_{status or 'unmarked'}")
     return _results_response(trip, participant=_participant_payload(participant))
 
 
@@ -234,6 +251,7 @@ def proposal_collection_api(request, public_id):
     if error:
         return JsonResponse({"error": error}, status=400)
     Proposal.objects.create(trip=trip, submitted_by=participant, **fields)
+    _activity(request, participant, "proposal_created")
     return _results_response(trip, participant=_participant_payload(participant))
 
 
@@ -244,11 +262,12 @@ def proposal_detail_api(request, public_id, proposal_id):
     body = _json_body(request)
     if body is None:
         return JsonResponse({"error": "Expected a JSON request body."}, status=400)
-    _participant, error = _participant_for_name(trip, body.get("name"))
+    participant, error = _participant_for_name(trip, body.get("name"))
     if error:
         return JsonResponse({"error": error}, status=400)
     if request.method == "DELETE":
         proposal.delete()
+        _activity(request, participant, "proposal_deleted")
         return _results_response(trip)
 
     fields, error = _proposal_fields(body, existing=proposal)
@@ -258,6 +277,7 @@ def proposal_detail_api(request, public_id, proposal_id):
         setattr(proposal, field, value)
     proposal.full_clean()
     proposal.save()
+    _activity(request, participant, "proposal_updated")
     return _results_response(trip)
 
 
@@ -274,6 +294,9 @@ def proposal_vote_api(request, public_id, proposal_id):
     vote = ProposalVote.objects.filter(proposal=proposal, participant=participant).first()
     if vote:
         vote.delete()
+        action = "proposal_vote_removed"
     else:
         ProposalVote.objects.create(proposal=proposal, participant=participant)
+        action = "proposal_upvoted"
+    _activity(request, participant, action)
     return _results_response(trip, participant=_participant_payload(participant))

@@ -306,6 +306,17 @@ class AvailabilityApiTests(TestCase, TripFactoryMixin):
         self.assertEqual(Participant.objects.count(), 1)
         self.assertEqual(Availability.objects.count(), 0)
 
+    def test_activity_log_includes_name_ip_and_action(self):
+        with self.assertLogs("scheduler.activity", level="INFO") as logs:
+            response = self.client.post(
+                self.url,
+                data=json.dumps({"name": "Maya", "date": "2026-07-02", "status": "available"}),
+                content_type="application/json",
+                REMOTE_ADDR="203.0.113.42",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("name='Maya' ip=203.0.113.42 action=availability_set_available", logs.output[0])
+
     def test_rejects_invalid_status_and_date_outside_trip(self):
         invalid_status = self.post_json({"name": "Maya", "date": "2026-07-02", "status": "yes"})
         outside_range = self.post_json({"name": "Maya", "date": "2026-08-02", "status": "available"})
