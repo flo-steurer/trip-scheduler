@@ -215,8 +215,12 @@ def trip_results(trip):
                 "name": shares["name"],
                 "yes_shares": shares["yes_shares"],
                 "no_shares": shares["no_shares"],
+                "stake": shares["yes_shares"] + shares["no_shares"],
                 "payout": payouts.get(participant_id, 0),
-            } for participant_id, shares in sorted(positions.items(), key=lambda item: item[1]["name"].casefold())],
+            } for participant_id, shares in sorted(
+                positions.items(),
+                key=lambda item: (-(item[1]["yes_shares"] + item[1]["no_shares"]), item[1]["name"].casefold()),
+            )],
         })
 
     return {

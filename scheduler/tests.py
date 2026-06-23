@@ -283,6 +283,9 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         market = first.json()["results"]["markets"][0]
         self.assertEqual(market["yes_odds"], 57)
         self.assertEqual(len(market["odds_history"]), 2)
+        self.assertEqual(market["positions"], [{
+            "name": "Maya", "yes_shares": 3, "no_shares": 0, "stake": 3, "payout": 0,
+        }])
 
     def test_resolution_pays_the_pool_to_winners_and_locks_the_market(self):
         maya = self.person(self.trip, "Maya")

@@ -290,7 +290,7 @@
       const card = document.createElement('article'); card.className = 'person-card';
       const heading = document.createElement('div'); heading.className = 'person-card-heading';
       const name = document.createElement('h3'); name.textContent = person.name;
-      const karma = document.createElement('span'); karma.className = 'person-karma'; karma.textContent = `✦ ${person.beer_karma || 0} beer karma`;
+      const karma = document.createElement('span'); karma.className = 'person-karma'; karma.textContent = `✦ ${person.beer_karma || 0} · ${person.beer_chips} chips`; karma.title = `${person.beer_karma || 0} Beer Karma · ${person.beer_chips} Beer Chips`;
       heading.append(name, karma); card.append(heading);
       const minimum = document.createElement('p'); minimum.className = 'participant-minimum'; minimum.textContent = `Minimum: ${minimumAttendanceLabel(person.minimum_attendance_days)}`; card.append(minimum);
       const mini = document.createElement('div'); mini.className = 'mini-calendar';
