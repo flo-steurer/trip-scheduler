@@ -3,6 +3,7 @@ from datetime import date
 
 from django.test import TestCase
 from django.urls import reverse
+from django.contrib.staticfiles import finders
 
 from .models import Availability, Participant, Trip
 from .services import trip_results
@@ -27,6 +28,21 @@ class TripFactoryMixin:
 
 
 class TripFormTests(TestCase):
+    def test_stylesheet_and_script_are_discoverable_static_assets(self):
+        self.assertIsNotNone(finders.find("scheduler/app.css"))
+        self.assertIsNotNone(finders.find("scheduler/trip.js"))
+
+    def test_trip_page_uses_absolute_static_asset_urls(self):
+        trip = Trip.objects.create(
+            title="Island escape",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 8),
+            duration_days=4,
+        )
+        response = self.client.get(reverse("trip_detail", args=[trip.public_id]))
+        self.assertContains(response, 'href="/static/scheduler/app.css"')
+        self.assertContains(response, 'src="/static/scheduler/trip.js"')
+
     def test_create_trip_redirects_to_opaque_public_url(self):
         response = self.client.post(reverse("create_trip"), {
             "title": "Island escape",

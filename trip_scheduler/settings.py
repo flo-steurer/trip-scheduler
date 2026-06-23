@@ -54,12 +54,13 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG
-        else "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        else "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
