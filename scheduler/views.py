@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urljoin
 
 from django.conf import settings
@@ -72,7 +73,7 @@ def _participant_payload(participant):
         "id": participant.id,
         "name": participant.name,
         "minimum_attendance_days": participant.minimum_attendance_days,
-        "beer_chips": participant.beer_chips,
+        "beer_chip_millis": participant.beer_chip_millis,
     }
 
 
@@ -339,35 +340,42 @@ def market_trade_api(request, public_id, market_id):
         return JsonResponse({"error": "Choose Yes or No."}, status=400)
     chips = body.get("chips")
     if isinstance(chips, bool):
-        return JsonResponse({"error": "Choose a whole number of Beer Chips."}, status=400)
+        return JsonResponse({"error": "Choose a valid Beer Chip amount."}, status=400)
     try:
-        chips = int(chips)
-    except (TypeError, ValueError):
-        return JsonResponse({"error": "Choose a whole number of Beer Chips."}, status=400)
-    if chips < 1:
-        return JsonResponse({"error": "Spend at least 1 Beer Chip."}, status=400)
+        chip_millis_decimal = Decimal(str(chips)) * Market.SHARE_SCALE
+        chip_millis = int(chip_millis_decimal)
+    except (InvalidOperation, TypeError, ValueError):
+        return JsonResponse({"error": "Choose a valid Beer Chip amount."}, status=400)
+    if chip_millis_decimal != chip_millis or chip_millis < 1:
+        return JsonResponse({"error": "Spend at least 0.001 Beer Chips."}, status=400)
     with transaction.atomic():
         market = Market.objects.select_for_update().get(trip=trip, pk=market_id)
         participant = Participant.objects.select_for_update().get(pk=participant.pk)
         if market.is_resolved:
             return JsonResponse({"error": "This Beermarket has already been resolved."}, status=400)
+        if market.is_cancelled:
+            return JsonResponse({"error": "This legacy market has been replaced."}, status=400)
+        if market.pricing_model != Market.PricingModel.SHARES:
+            return JsonResponse({"error": "This legacy pool market must be rebuilt before trading."}, status=400)
         world_cup_market = WorldCupMarket.objects.select_related("fixture").filter(market=market).first()
         if world_cup_market and not world_cup_market.fixture.is_tradeable:
             return JsonResponse({"error": "This World Cup market is no longer accepting trades."}, status=400)
-        if chips > participant.beer_chips:
+        if chip_millis > participant.beer_chip_millis:
             return JsonResponse({"error": "You do not have that many Beer Chips."}, status=400)
         existing_trades = list(market.trades.all())
-        yes_chips = market.seed_chips + sum(trade.chips for trade in existing_trades if trade.outcome == Market.Outcome.YES)
-        no_chips = market.seed_chips + sum(trade.chips for trade in existing_trades if trade.outcome == Market.Outcome.NO)
-        entry_odds = round((yes_chips if outcome == Market.Outcome.YES else no_chips) / (yes_chips + no_chips) * 100)
-        participant.beer_chips -= chips
-        participant.save(update_fields=["beer_chips"])
+        _yes_shares, _no_shares, yes_price = market.share_market_state(existing_trades)
+        entry_odds = round((yes_price if outcome == Market.Outcome.YES else 1 - yes_price) * 100)
+        shares_millis = market.shares_for_cost(existing_trades, outcome, chip_millis)
+        participant.beer_chip_millis -= chip_millis
+        participant.save(update_fields=["beer_chip_millis"])
         MarketTrade.objects.create(
             market=market,
             participant=participant,
             outcome=outcome,
-            chips=chips,
+            chips=max(1, chip_millis // Market.SHARE_SCALE),
             entry_odds=entry_odds,
+            cost_millis=chip_millis,
+            shares_millis=shares_millis,
         )
-    _activity(request, participant, f"market_trade_bought_{outcome}_{chips}")
+    _activity(request, participant, f"market_trade_bought_{outcome}_{chip_millis}")
     return _results_response(trip, participant=_participant_payload(participant))

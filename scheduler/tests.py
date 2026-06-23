@@ -1,6 +1,8 @@
 import json
+from io import StringIO
 from datetime import date
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.test import override_settings
 from django.urls import reverse
@@ -278,24 +280,24 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         first = self.post_json({"name": "Maya", "outcome": "yes", "chips": 3})
         self.assertEqual(first.status_code, 200)
         participant = Participant.objects.get()
-        self.assertEqual(participant.beer_chips, 7)
+        self.assertEqual(participant.beer_chip_millis, 7000)
         self.assertEqual(MarketTrade.objects.get().outcome, "yes")
         self.assertEqual(MarketTrade.objects.get().entry_odds, 50)
         market = first.json()["results"]["markets"][0]
-        self.assertEqual(market["yes_odds"], 57)
+        self.assertGreater(market["yes_odds"], 50)
         self.assertEqual(len(market["odds_history"]), 2)
-        self.assertEqual(market["positions"], [{
-            "name": "Maya", "yes_shares": 3, "no_shares": 0, "stake": 3,
-            "yes_entry_odds": 50, "no_entry_odds": None, "yes_payout": 3, "no_payout": 0, "payout": 0,
-        }])
+        self.assertEqual(market["positions"][0]["name"], "Maya")
+        self.assertEqual(market["positions"][0]["cost_millis"], 3000)
+        self.assertEqual(market["positions"][0]["yes_entry_odds"], 50)
+        self.assertGreater(market["positions"][0]["yes_shares_millis"], 3000)
 
     def test_resolution_pays_the_pool_to_winners_and_locks_the_market(self):
         maya = self.person(self.trip, "Maya")
         ari = self.person(self.trip, "Ari")
-        maya.beer_chips = 7
-        ari.beer_chips = 8
-        maya.save(update_fields=["beer_chips"])
-        ari.save(update_fields=["beer_chips"])
+        maya.beer_chip_millis = 7000
+        ari.beer_chip_millis = 8000
+        maya.save(update_fields=["beer_chip_millis"])
+        ari.save(update_fields=["beer_chip_millis"])
         MarketTrade.objects.create(market=self.market, participant=maya, outcome="yes", chips=3)
         MarketTrade.objects.create(market=self.market, participant=ari, outcome="no", chips=2)
 
@@ -304,14 +306,39 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         ari.refresh_from_db()
         self.assertEqual(maya.beer_karma_bonus, 1)
         self.assertEqual(ari.beer_karma_bonus, 0)
-        self.assertEqual(maya.beer_chips, 12)
-        self.assertEqual(ari.beer_chips, 8)
+        self.assertEqual(maya.beer_chip_millis, 10000)
+        self.assertEqual(ari.beer_chip_millis, 8000)
         self.assertTrue(self.market.is_resolved)
 
         rejected = self.post_json({"name": "Maya", "outcome": "no", "chips": 1})
         self.assertEqual(rejected.status_code, 400)
         participants = {participant["name"]: participant for participant in trip_results(self.trip)["participants"]}
         self.assertEqual(participants["Maya"]["beer_karma"], 1)
+
+    def test_rebuild_command_refunds_and_replaces_open_legacy_markets(self):
+        legacy = Market.objects.create(
+            trip=self.trip,
+            question="Will Kai join the trip planning?",
+            pricing_model=Market.PricingModel.LEGACY,
+        )
+        maya = self.person(self.trip, "Maya")
+        maya.beer_chip_millis = 7000
+        maya.save(update_fields=["beer_chip_millis"])
+        MarketTrade.objects.create(market=legacy, participant=maya, outcome="yes", chips=3)
+
+        preview = StringIO()
+        call_command("rebuild_beermarket", stdout=preview)
+        self.assertIn("Dry run only", preview.getvalue())
+        legacy.refresh_from_db()
+        self.assertIsNone(legacy.cancelled_at)
+
+        call_command("rebuild_beermarket", "--apply", stdout=StringIO())
+        legacy.refresh_from_db()
+        maya.refresh_from_db()
+        self.assertIsNotNone(legacy.cancelled_at)
+        self.assertEqual(maya.beer_chip_millis, 10000)
+        self.assertEqual(legacy.replacement.pricing_model, Market.PricingModel.SHARES)
+        self.assertEqual(legacy.replacement.question, legacy.question)
 
 
 class ProposalApiTests(TestCase, TripFactoryMixin):

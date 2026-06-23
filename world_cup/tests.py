@@ -98,8 +98,8 @@ class WorldCupSyncTests(TestCase, WorldCupFactoryMixin):
         client = FakeClient([fixture_payload(20, "Austria", "Germany")])
         sync_world_cup(client, full=True)
         market = WorldCupMarket.objects.get(trip=trip).market
-        winner = Participant.objects.create(trip=trip, name="Winner", beer_chips=7)
-        loser = Participant.objects.create(trip=trip, name="Loser", beer_chips=8)
+        winner = Participant.objects.create(trip=trip, name="Winner", beer_chip_millis=7000)
+        loser = Participant.objects.create(trip=trip, name="Loser", beer_chip_millis=8000)
         MarketTrade.objects.create(market=market, participant=winner, outcome="yes", chips=3)
         MarketTrade.objects.create(market=market, participant=loser, outcome="no", chips=2)
 
@@ -113,9 +113,9 @@ class WorldCupSyncTests(TestCase, WorldCupFactoryMixin):
         self.assertEqual(first["settled"], 1)
         self.assertEqual(second["settled"], 0)
         self.assertEqual(market.resolved_outcome, Market.Outcome.YES)
-        self.assertEqual(winner.beer_chips, 12)
+        self.assertEqual(winner.beer_chip_millis, 10000)
         self.assertEqual(winner.beer_karma_bonus, 1)
-        self.assertEqual(loser.beer_chips, 8)
+        self.assertEqual(loser.beer_chip_millis, 8000)
 
     def test_nearby_sync_requests_a_bounded_date_window(self):
         client = FakeClient([])

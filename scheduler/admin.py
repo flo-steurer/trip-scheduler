@@ -20,10 +20,14 @@ class TripAdmin(admin.ModelAdmin):
 
 @admin.register(Participant)
 class ParticipantAdmin(admin.ModelAdmin):
-    list_display = ("name", "trip", "beer_chips", "beer_karma_bonus", "created_at")
+    list_display = ("name", "trip", "beer_chip_balance", "beer_karma_bonus", "created_at")
     search_fields = ("name",)
     list_select_related = ("trip",)
     inlines = [AvailabilityInline]
+
+    @admin.display(description="Beer Chips")
+    def beer_chip_balance(self, participant):
+        return f"{participant.beer_chip_millis / 1000:g}"
 
 
 class MarketTradeInline(admin.TabularInline):

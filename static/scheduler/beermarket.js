@@ -12,6 +12,10 @@
   const currentName = () => nameInput.value.trim();
   const ownParticipant = () => results.participants.find((person) => person.name.toLocaleLowerCase() === currentName().toLocaleLowerCase());
   const marketUrl = (id) => app.dataset.tradeUrl.replace('/0/', `/${id}/`);
+  const formatChips = (millis) => {
+    const value = (millis || 0) / 1000;
+    return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  };
 
   function setState(message, error = false) {
     state.textContent = message;
@@ -30,8 +34,8 @@
   }
 
   function renderAccount() {
-    const chips = ownParticipant()?.beer_chips ?? 10;
-    balance.textContent = `${chips} Beer Chip${chips === 1 ? '' : 's'}`;
+    const chips = ownParticipant()?.beer_chip_millis ?? 10000;
+    balance.textContent = `${formatChips(chips)} Beer Chips`;
   }
 
   function lineChart(history) {
@@ -74,23 +78,25 @@
       const item = document.createElement('li');
       const top = document.createElement('div'); top.className = 'market-stake-top';
       const name = document.createElement('strong'); name.textContent = position.name;
-      const amount = document.createElement('span'); amount.textContent = `${position.stake} chip${position.stake === 1 ? '' : 's'}`;
+      const amount = document.createElement('span'); amount.textContent = `${formatChips(position.cost_millis)} chips`;
       top.append(name, amount);
       if (market.is_resolved) {
         const detail = document.createElement('span'); detail.className = 'market-stake-detail';
-        detail.textContent = `Payout: ${position.payout} chip${position.payout === 1 ? '' : 's'}${position.payout ? ' · +1 karma' : ''}`;
+        detail.textContent = `Payout: ${formatChips(position.payout_millis)} chips${position.payout_millis ? ' · +1 karma' : ''}`;
         item.append(top, detail);
       } else {
         const entries = document.createElement('div'); entries.className = 'market-stake-entries'; entries.style.display = 'grid'; entries.style.gap = '2px'; entries.style.marginTop = '3px'; entries.style.fontSize = '.67rem'; entries.style.fontWeight = '720';
-        if (position.yes_shares) {
-          const yes = document.createElement('span'); yes.className = 'yes'; yes.style.color = '#078357'; yes.textContent = `Yes ${position.yes_shares} @ ${position.yes_entry_odds}¢ → ${market.yes_odds}¢`; entries.append(yes);
+        if (position.yes_shares_millis) {
+          const yes = document.createElement('span'); yes.className = 'yes'; yes.style.color = '#078357'; yes.textContent = `Yes ${formatChips(position.yes_shares_millis)} shares @ ${position.yes_entry_odds}¢ → ${market.yes_odds}¢`; entries.append(yes);
         }
-        if (position.no_shares) {
-          const no = document.createElement('span'); no.className = 'no'; no.style.color = '#b94d48'; no.textContent = `No ${position.no_shares} @ ${position.no_entry_odds}¢ → ${market.no_odds}¢`; entries.append(no);
+        if (position.no_shares_millis) {
+          const no = document.createElement('span'); no.className = 'no'; no.style.color = '#b94d48'; no.textContent = `No ${formatChips(position.no_shares_millis)} shares @ ${position.no_entry_odds}¢ → ${market.no_odds}¢`; entries.append(no);
         }
         const scenarios = document.createElement('span'); scenarios.className = 'market-stake-detail';
-        scenarios.textContent = `If Yes: ${position.yes_payout} · If No: ${position.no_payout} chips`;
-        item.append(top, entries, scenarios);
+        const pnl = position.profit_loss_millis >= 0 ? `+${formatChips(position.profit_loss_millis)}` : formatChips(position.profit_loss_millis);
+        scenarios.textContent = `Value: ${formatChips(position.mark_value_millis)} · P/L: ${pnl} chips`;
+        const payout = document.createElement('span'); payout.className = 'market-stake-detail'; payout.textContent = `If Yes: ${formatChips(position.yes_payout_millis)} · If No: ${formatChips(position.no_payout_millis)} chips`;
+        item.append(top, entries, scenarios, payout);
       }
       list.append(item);
     });
@@ -104,6 +110,7 @@
     const fixture = market.world_cup;
     const status = document.createElement('span'); status.className = `market-status${market.is_resolved ? ' resolved' : ''}`;
     if (market.is_resolved) status.textContent = fixture?.final_score ? `Final: ${fixture.final_score}` : `Resolved: ${market.resolved_outcome === 'yes' ? 'Yes' : 'No'}`;
+    else if (market.pricing_model === 'legacy') status.textContent = 'Legacy market';
     else if (fixture) status.textContent = fixture.status === 'live' ? 'World Cup · Live' : fixture.status === 'cancelled' ? 'World Cup · Closed' : 'World Cup';
     else status.textContent = 'Live';
     top.append(question, status); card.append(top);
@@ -123,10 +130,13 @@
     const chartCaption = document.createElement('div'); chartCaption.className = 'chart-caption'; chartCaption.innerHTML = '<span>Market opened</span><span>Latest trade</span>'; chart.append(chartCaption);
     analysis.append(chart, stakePanel(market));
     card.append(prices, analysis);
-    const pool = document.createElement('p'); pool.className = 'market-pool'; pool.textContent = `${market.total_chips} Beer Chip${market.total_chips === 1 ? '' : 's'} in the pool`; card.append(pool);
+    const pool = document.createElement('p'); pool.className = 'market-pool'; pool.textContent = `${formatChips(market.total_chips_millis)} Beer Chips traded`; card.append(pool);
+    if (market.pricing_model === 'legacy' && !market.is_resolved) {
+      const legacy = document.createElement('p'); legacy.className = 'market-position'; legacy.textContent = 'This legacy pool market must be rebuilt before it can accept share trades.'; card.append(legacy);
+    }
     if (market.is_tradeable) {
       const trade = document.createElement('div'); trade.className = 'market-trade';
-      const amount = document.createElement('input'); amount.type = 'number'; amount.min = '1'; amount.max = String(ownParticipant()?.beer_chips ?? 10); amount.value = '1'; amount.setAttribute('aria-label', 'Beer Chips to spend');
+      const amount = document.createElement('input'); amount.type = 'number'; amount.min = '0.001'; amount.step = '0.001'; amount.max = formatChips(ownParticipant()?.beer_chip_millis ?? 10000); amount.value = '1'; amount.setAttribute('aria-label', 'Beer Chips to spend');
       const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'market-buy yes'; yes.textContent = 'Buy Yes'; yes.addEventListener('click', () => buyShares(market, 'yes', amount.value));
       const no = document.createElement('button'); no.type = 'button'; no.className = 'market-buy no'; no.textContent = 'Buy No'; no.addEventListener('click', () => buyShares(market, 'no', amount.value));
       trade.append(amount, yes, no); card.append(trade);
