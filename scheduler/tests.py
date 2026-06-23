@@ -45,6 +45,13 @@ class TripFormTests(TestCase):
         self.assertIsNotNone(finders.find("scheduler/trip.js"))
         self.assertIsNotNone(finders.find("scheduler/beermarket.js"))
 
+    def test_calendar_uses_millisecond_chip_balances(self):
+        with open(finders.find("scheduler/trip.js"), encoding="utf-8") as script:
+            contents = script.read()
+
+        self.assertIn("person.beer_chip_millis", contents)
+        self.assertNotIn("person.beer_chips", contents)
+
     def test_trip_page_uses_absolute_static_asset_urls(self):
         trip = Trip.objects.create(
             title="Island escape",
