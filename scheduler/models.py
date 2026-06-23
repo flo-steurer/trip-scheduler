@@ -85,6 +85,18 @@ class Participant(models.Model):
         return f"{self.name} ({self.trip})"
 
 
+class DailyBeercoinGrant(models.Model):
+    grant_date = models.DateField(unique=True)
+    amount_millis = models.PositiveIntegerField(default=10000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-grant_date"]
+
+    def __str__(self):
+        return f"{self.amount_millis / 1000:g} Beer Chips on {self.grant_date}"
+
+
 class Availability(models.Model):
     class Status(models.TextChoices):
         AVAILABLE = "available", "Available"

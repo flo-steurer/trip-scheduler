@@ -9,6 +9,8 @@ A small, self-hosted group trip availability tool. Create a trip, share its priv
 3. Start it: `docker compose up --build`.
 4. Open `http://localhost:8000` (or the configured `PORT`). SQLite data is persisted in `./data`.
 
+Docker Compose also runs a background worker that gives every current participant 10 Beer Chips once per UTC calendar day. Each daily grant is recorded, so restarting the worker cannot credit the same day twice.
+
 For a reverse proxy using HTTPS, also set `DJANGO_SECURE_SSL_REDIRECT=true` and set `CSRF_TRUSTED_ORIGINS` to the public origin, for example `https://trips.internal.example`.
 
 ## Development
@@ -29,6 +31,6 @@ Do not expose Gunicorn directly to the public internet. Place it behind a VPN or
 
 ## Optional 2026 World Cup Beermarkets
 
-Set `FOOTBALL_DATA_API_KEY` and `WORLD_CUP_SYNC_ENABLED=true` in `.env`, then restart Compose. The `world-cup-sync` service creates and settles markets only for World Cup fixtures involving Austria, Germany, or Cape Verde. It polls every 20 minutes by default and uses the football-data.org token only in the background container.
+Set `FOOTBALL_DATA_API_KEY` and `WORLD_CUP_SYNC_ENABLED=true` in `.env`, then restart Compose. The `world-cup-sync` service creates and settles markets for every World Cup fixture. It polls every 20 minutes by default and uses the football-data.org token only in the background container.
 
 After the tournament, set `WORLD_CUP_SYNC_ENABLED=false`, remove the `world-cup-sync` service and the `world_cup` Django app in a cleanup change. Generated settled markets remain ordinary historical Beermarket records; manual markets are never modified by the integration.

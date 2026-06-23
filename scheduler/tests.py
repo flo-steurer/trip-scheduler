@@ -8,8 +8,8 @@ from django.test import override_settings
 from django.urls import reverse
 from django.contrib.staticfiles import finders
 
-from .models import Availability, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
-from .services import idea_leaderboard, trip_results
+from .models import Availability, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
+from .services import grant_daily_beercoins, idea_leaderboard, trip_results
 
 
 class TripFactoryMixin:
@@ -244,6 +244,30 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(window["eligible_attendees"], ["Ari"])
         self.assertEqual(window["attendance_rate"], 100)
         self.assertEqual(window["below_minimum"], [])
+
+    def test_daily_beercoins_are_awarded_once_per_day(self):
+        trip = self.make_trip()
+        maya = self.person(trip, "Maya")
+        ari = self.person(trip, "Ari")
+        maya.beer_chip_millis = 3000
+        ari.beer_chip_millis = 7000
+        maya.save(update_fields=["beer_chip_millis"])
+        ari.save(update_fields=["beer_chip_millis"])
+
+        grant, recipient_count = grant_daily_beercoins(date(2026, 7, 1))
+
+        self.assertEqual(recipient_count, 2)
+        self.assertEqual(grant.amount_millis, 10000)
+        maya.refresh_from_db()
+        ari.refresh_from_db()
+        self.assertEqual(maya.beer_chip_millis, 13000)
+        self.assertEqual(ari.beer_chip_millis, 17000)
+
+        repeated_grant, repeated_recipient_count = grant_daily_beercoins(date(2026, 7, 1))
+
+        self.assertEqual(repeated_grant.pk, grant.pk)
+        self.assertEqual(repeated_recipient_count, 0)
+        self.assertEqual(DailyBeercoinGrant.objects.count(), 1)
 
     def test_proposals_are_ranked_by_upvotes_and_expose_voters(self):
         trip = self.make_trip()

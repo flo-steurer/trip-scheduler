@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 
-from .models import Availability, Market, MarketTrade, Participant, Trip
+from .models import Availability, DailyBeercoinGrant, Market, MarketTrade, Participant, Trip
 
 
 class AvailabilityInline(admin.TabularInline):
@@ -28,6 +28,16 @@ class ParticipantAdmin(admin.ModelAdmin):
     @admin.display(description="Beer Chips")
     def beer_chip_balance(self, participant):
         return f"{participant.beer_chip_millis / 1000:g}"
+
+
+@admin.register(DailyBeercoinGrant)
+class DailyBeercoinGrantAdmin(admin.ModelAdmin):
+    list_display = ("grant_date", "beercoin_amount", "created_at")
+    readonly_fields = ("grant_date", "amount_millis", "created_at")
+
+    @admin.display(description="Beer Chips")
+    def beercoin_amount(self, grant):
+        return f"{grant.amount_millis / 1000:g}"
 
 
 class MarketTradeInline(admin.TabularInline):

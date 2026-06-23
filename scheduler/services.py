@@ -1,9 +1,14 @@
 from collections import defaultdict
 from datetime import timedelta
 
-from django.db.models import Count
+from django.db import transaction
+from django.db.models import Count, F
+from django.utils import timezone
 
-from .models import Availability, Proposal
+from .models import Availability, DailyBeercoinGrant, Participant, Proposal
+
+
+DAILY_BEERCOIN_MILLIS = 10_000
 
 
 def date_range(start, end):
@@ -11,6 +16,22 @@ def date_range(start, end):
     while current <= end:
         yield current
         current += timedelta(days=1)
+
+
+def grant_daily_beercoins(grant_date=None):
+    """Credit every current participant once for the given calendar day."""
+    grant_date = grant_date or timezone.localdate()
+    with transaction.atomic():
+        grant, created = DailyBeercoinGrant.objects.get_or_create(
+            grant_date=grant_date,
+            defaults={"amount_millis": DAILY_BEERCOIN_MILLIS},
+        )
+        if not created:
+            return grant, 0
+        recipient_count = Participant.objects.update(
+            beer_chip_millis=F("beer_chip_millis") + grant.amount_millis,
+        )
+    return grant, recipient_count
 
 
 def idea_leaderboard(trip):

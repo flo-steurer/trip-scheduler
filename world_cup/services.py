@@ -1,4 +1,3 @@
-import unicodedata
 from datetime import timedelta, timezone as datetime_timezone
 
 from django.db import IntegrityError, transaction
@@ -10,29 +9,9 @@ from scheduler.models import Market, Trip
 from .models import WorldCupFixture, WorldCupMarket
 
 
-TARGET_TEAM_ALIASES = {
-    "austria",
-    "germany",
-    "cape verde",
-    "cape verde islands",
-    "cabo verde",
-}
-
 LIVE_STATUSES = {"IN_PLAY", "PAUSED"}
 FINAL_STATUSES = {"FINISHED"}
 CANCELLED_STATUSES = {"SUSPENDED", "CANCELLED", "AWARDED"}
-
-
-def normalize_team_name(name):
-    normalized = unicodedata.normalize("NFKD", name or "")
-    return " ".join(normalized.encode("ascii", "ignore").decode("ascii").casefold().split())
-
-
-def is_target_fixture(home_team, away_team):
-    return bool(home_team and away_team) and (
-        normalize_team_name(home_team) in TARGET_TEAM_ALIASES
-        or normalize_team_name(away_team) in TARGET_TEAM_ALIASES
-    )
 
 
 def fixture_status(source_status):
@@ -87,7 +66,7 @@ def _market_for_trip(fixture, trip):
 
 
 def materialize_fixture_markets(fixture, trips=None):
-    if not fixture.is_tradeable or not is_target_fixture(fixture.home_team, fixture.away_team):
+    if not fixture.is_tradeable:
         return 0
     created = 0
     for trip in trips if trips is not None else Trip.objects.all():
@@ -121,7 +100,7 @@ def settle_fixture_markets(fixture):
 @transaction.atomic
 def sync_fixture(payload):
     values = fixture_values(payload)
-    if not is_target_fixture(values["home_team"], values["away_team"]):
+    if not values["home_team"] or not values["away_team"]:
         return {"fixtures": 0, "markets": 0, "settled": 0}
     fixture, _created = WorldCupFixture.objects.update_or_create(
         provider_fixture_id=values.pop("provider_fixture_id"),

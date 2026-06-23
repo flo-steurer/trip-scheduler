@@ -35,3 +35,18 @@ services:
     depends_on:
       - trip-scheduler
     restart: unless-stopped
+
+  beercoin-rewards:
+    build: .
+    command: >
+      sh -c 'until python manage.py grant_daily_beercoins --watch;
+      do echo "Daily Beercoin grant failed; retrying in 5 seconds"; sleep 5; done'
+    environment:
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-replace-this-before-sharing}"
+      DJANGO_DEBUG: "${DJANGO_DEBUG:-false}"
+      SQLITE_PATH: "/data/trip-scheduler.sqlite3"
+    volumes:
+      - ./data:/data
+    depends_on:
+      - trip-scheduler
+    restart: unless-stopped

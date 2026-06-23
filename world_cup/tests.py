@@ -10,7 +10,6 @@ from scheduler.services import trip_results
 from world_cup.models import WorldCupFixture, WorldCupMarket
 from world_cup.provider import FootballDataClient, FootballDataError
 from world_cup.services import (
-    is_target_fixture,
     materialize_world_cup_markets_for_trip,
     sync_world_cup,
 )
@@ -60,7 +59,7 @@ class WorldCupSyncTests(TestCase, WorldCupFactoryMixin):
         self.assertEqual(totals, {"fixtures": 0, "markets": 0, "settled": 0})
         self.assertEqual(WorldCupFixture.objects.count(), 0)
 
-    def test_only_targeted_team_fixtures_are_imported_and_aliases_are_accepted(self):
+    def test_all_fixtures_with_known_teams_are_imported(self):
         first = self.make_trip("First")
         second = self.make_trip("Second")
         client = FakeClient([
@@ -71,13 +70,11 @@ class WorldCupSyncTests(TestCase, WorldCupFactoryMixin):
 
         totals = sync_world_cup(client, full=True)
 
-        self.assertEqual(totals, {"fixtures": 2, "markets": 4, "settled": 0})
-        self.assertEqual(WorldCupFixture.objects.count(), 2)
-        self.assertEqual(WorldCupMarket.objects.count(), 4)
-        self.assertTrue(is_target_fixture("Cape Verde Islands", "Japan"))
-        self.assertFalse(is_target_fixture("Spain", "Morocco"))
-        self.assertEqual(WorldCupMarket.objects.filter(trip=first).count(), 2)
-        self.assertEqual(WorldCupMarket.objects.filter(trip=second).count(), 2)
+        self.assertEqual(totals, {"fixtures": 3, "markets": 6, "settled": 0})
+        self.assertEqual(WorldCupFixture.objects.count(), 3)
+        self.assertEqual(WorldCupMarket.objects.count(), 6)
+        self.assertEqual(WorldCupMarket.objects.filter(trip=first).count(), 3)
+        self.assertEqual(WorldCupMarket.objects.filter(trip=second).count(), 3)
         self.assertEqual(client.calls, [{}])
 
     def test_sync_is_idempotent_and_new_trip_receives_known_fixture_markets(self):
