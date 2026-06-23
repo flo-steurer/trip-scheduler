@@ -2,7 +2,8 @@ import uuid
 from datetime import date
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 
 
 class Trip(models.Model):
@@ -58,6 +59,7 @@ class Participant(models.Model):
     name = models.CharField(max_length=80)
     normalized_name = models.CharField(max_length=80)
     minimum_attendance_days = models.PositiveSmallIntegerField(default=1)
+    beer_karma_bonus = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -140,3 +142,62 @@ class ProposalVote(models.Model):
     def clean(self):
         if self.proposal_id and self.participant_id and self.proposal.trip_id != self.participant.trip_id:
             raise ValidationError({"participant": "Votes must come from a participant in the same trip."})
+
+
+class Bet(models.Model):
+    class Outcome(models.TextChoices):
+        YES = "yes", "Yes"
+        NO = "no", "No"
+
+    trip = models.ForeignKey(Trip, related_name="bets", on_delete=models.CASCADE)
+    question = models.CharField(max_length=240)
+    settled_outcome = models.CharField(max_length=3, choices=Outcome.choices, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    settled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @property
+    def is_settled(self):
+        return bool(self.settled_outcome)
+
+    def settle(self, outcome):
+        if outcome not in self.Outcome.values:
+            raise ValidationError("Choose a valid bet outcome.")
+        with transaction.atomic():
+            bet = type(self).objects.select_for_update().get(pk=self.pk)
+            if bet.is_settled:
+                raise ValidationError("This bet has already been settled.")
+            winner_ids = list(
+                bet.predictions.filter(prediction=outcome).values_list("participant_id", flat=True)
+            )
+            Participant.objects.filter(pk__in=winner_ids).update(
+                beer_karma_bonus=models.F("beer_karma_bonus") + 1
+            )
+            bet.settled_outcome = outcome
+            bet.settled_at = timezone.now()
+            bet.save(update_fields=["settled_outcome", "settled_at"])
+        self.settled_outcome = bet.settled_outcome
+        self.settled_at = bet.settled_at
+        return len(winner_ids)
+
+    def __str__(self):
+        return self.question
+
+
+class BetPrediction(models.Model):
+    bet = models.ForeignKey(Bet, related_name="predictions", on_delete=models.CASCADE)
+    participant = models.ForeignKey(Participant, related_name="bet_predictions", on_delete=models.CASCADE)
+    prediction = models.CharField(max_length=3, choices=Bet.Outcome.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["bet", "participant"], name="unique_bet_prediction_per_participant"),
+        ]
+
+    def clean(self):
+        if self.bet_id and self.participant_id and self.bet.trip_id != self.participant.trip_id:
+            raise ValidationError({"participant": "Bets must come from a participant in the same trip."})

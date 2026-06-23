@@ -6,7 +6,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.contrib.staticfiles import finders
 
-from .models import Availability, Participant, Proposal, ProposalVote, Trip
+from .models import Availability, Bet, BetPrediction, Participant, Proposal, ProposalVote, Trip
 from .services import idea_leaderboard, trip_results
 
 
@@ -249,6 +249,45 @@ class LeaderboardPageTests(TestCase, TripFactoryMixin):
         self.assertContains(response, "1 post")
         self.assertContains(response, "1 upvote")
         self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
+
+
+class BeerBetTests(TestCase, TripFactoryMixin):
+    def setUp(self):
+        self.trip = self.make_trip()
+        self.bet = Bet.objects.create(trip=self.trip, question="Will Kai join the trip planning?")
+        self.url = reverse("bet_prediction_api", args=[self.trip.public_id, self.bet.id])
+
+    def post_json(self, data):
+        return self.client.post(self.url, data=json.dumps(data), content_type="application/json")
+
+    def test_participant_can_change_an_open_prediction_and_the_result_exposes_bets(self):
+        first = self.post_json({"name": "Maya", "prediction": "yes"})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(BetPrediction.objects.get().prediction, "yes")
+        self.assertEqual(first.json()["results"]["bets"][0]["yes_count"], 1)
+
+        changed = self.post_json({"name": "Maya", "prediction": "no"})
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(BetPrediction.objects.count(), 1)
+        self.assertEqual(BetPrediction.objects.get().prediction, "no")
+        self.assertEqual(changed.json()["results"]["bets"][0]["no_count"], 1)
+
+    def test_settling_awards_correct_predictions_once_and_locks_the_bet(self):
+        maya = self.person(self.trip, "Maya")
+        ari = self.person(self.trip, "Ari")
+        BetPrediction.objects.create(bet=self.bet, participant=maya, prediction="yes")
+        BetPrediction.objects.create(bet=self.bet, participant=ari, prediction="no")
+
+        self.assertEqual(self.bet.settle(Bet.Outcome.YES), 1)
+        maya.refresh_from_db()
+        ari.refresh_from_db()
+        self.assertEqual(maya.beer_karma_bonus, 1)
+        self.assertEqual(ari.beer_karma_bonus, 0)
+        self.assertTrue(self.bet.is_settled)
+
+        rejected = self.post_json({"name": "Maya", "prediction": "no"})
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(trip_results(self.trip)["participants"][1]["beer_karma"], 1)
 
 
 class ProposalApiTests(TestCase, TripFactoryMixin):

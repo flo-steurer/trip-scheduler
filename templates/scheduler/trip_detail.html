@@ -10,6 +10,7 @@
      data-availability-range-url="{% url 'availability_range_api' trip.public_id %}"
      data-results-url="{% url 'results_api' trip.public_id %}"
      data-proposals-url="{% url 'proposal_collection_api' trip.public_id %}"
+     data-bet-url="{% url 'bet_prediction_api' trip.public_id 0 %}"
      data-start-date="{{ trip.start_date|date:'Y-m-d' }}"
      data-end-date="{{ trip.end_date|date:'Y-m-d' }}"
      data-minimum-duration="{{ trip.minimum_duration_days }}"
@@ -83,6 +84,17 @@
         <div class="proposal-form-actions"><button id="proposal-submit" class="button" type="submit">Add idea <span>+</span></button><button id="proposal-cancel" class="text-button" type="button" hidden>Cancel</button></div>
       </form>
       <div id="proposal-board" class="proposal-board"></div>
+    </div>
+  </details>
+
+  <details class="card collapsible-section bets-section" data-collapsible="beer-bets" open>
+    <summary aria-labelledby="bets-title">
+      <div class="section-heading"><div><p class="eyebrow">Side quest</p><h2 id="bets-title">Beer Bets</h2></div><span class="collapse-summary"><span id="bet-summary">0 open bets</span><span class="collapse-chevron">⌄</span></span></div>
+    </summary>
+    <div class="collapsible-content">
+      <span id="bet-state" class="save-state" aria-live="polite"></span>
+      <p class="help">Pick Yes or No on open bets. The trip organizer settles the result in the backend; every correct prediction earns 1 Beer Karma.</p>
+      <div id="bet-board" class="bet-board"></div>
     </div>
   </details>
 

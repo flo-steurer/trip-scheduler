@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import TripForm
-from .models import Availability, Participant, Proposal, ProposalVote, Trip
+from .models import Availability, Bet, BetPrediction, Participant, Proposal, ProposalVote, Trip
 from .services import idea_leaderboard, trip_results
 
 
@@ -308,4 +308,28 @@ def proposal_vote_api(request, public_id, proposal_id):
         ProposalVote.objects.create(proposal=proposal, participant=participant)
         action = "proposal_upvoted"
     _activity(request, participant, action)
+    return _results_response(trip, participant=_participant_payload(participant))
+
+
+@require_POST
+def bet_prediction_api(request, public_id, bet_id):
+    trip = _trip(public_id)
+    bet = get_object_or_404(Bet, trip=trip, pk=bet_id)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    prediction = body.get("prediction")
+    if prediction not in Bet.Outcome.values:
+        return JsonResponse({"error": "Choose Yes or No."}, status=400)
+    if bet.is_settled:
+        return JsonResponse({"error": "This Beer Bet has already been settled."}, status=400)
+    BetPrediction.objects.update_or_create(
+        bet=bet,
+        participant=participant,
+        defaults={"prediction": prediction},
+    )
+    _activity(request, participant, f"bet_prediction_set_{prediction}")
     return _results_response(trip, participant=_participant_payload(participant))

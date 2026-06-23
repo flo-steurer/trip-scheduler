@@ -21,9 +21,12 @@ def idea_leaderboard(trip):
     )
     entries = []
     for participant in participants:
-        karma = participant.post_count + participant.upvote_count
+        idea_karma = participant.post_count + participant.upvote_count
+        karma = idea_karma + participant.beer_karma_bonus
         if karma >= 8:
             title = "Itinerary Overlord"
+        elif participant.beer_karma_bonus and not idea_karma:
+            title = "Beer Oracle"
         elif participant.upvote_count >= participant.post_count and karma:
             title = "Upvote Magnet"
         elif participant.post_count:
@@ -34,11 +37,13 @@ def idea_leaderboard(trip):
             "name": participant.name,
             "post_count": participant.post_count,
             "upvote_count": participant.upvote_count,
+            "bet_karma": participant.beer_karma_bonus,
             "karma": karma,
             "title": title,
         })
     entries.sort(key=lambda entry: (
         -entry["karma"],
+        -entry["bet_karma"],
         -entry["upvote_count"],
         -entry["post_count"],
         entry["name"].casefold(),
@@ -172,6 +177,25 @@ def trip_results(trip):
     for proposal in proposal_results:
         proposal.pop("created_at_timestamp", None)
 
+    bets = list(trip.bets.prefetch_related("predictions__participant"))
+    bet_results = []
+    for bet in bets:
+        predictions = list(bet.predictions.all())
+        bet_results.append({
+            "id": bet.id,
+            "question": bet.question,
+            "is_settled": bet.is_settled,
+            "settled_outcome": bet.settled_outcome,
+            "prediction_count": len(predictions),
+            "yes_count": sum(prediction.prediction == "yes" for prediction in predictions),
+            "no_count": sum(prediction.prediction == "no" for prediction in predictions),
+            "predictions": [{
+                "name": prediction.participant.name,
+                "prediction": prediction.prediction,
+                "won": bet.is_settled and prediction.prediction == bet.settled_outcome,
+            } for prediction in predictions],
+        })
+
     return {
         "daily": daily,
         "windows": windows,
@@ -183,7 +207,14 @@ def trip_results(trip):
                 karma_by_participant[participant.id]["post_count"]
                 + karma_by_participant[participant.id]["upvote_count"]
             ),
+            "bet_karma": participant.beer_karma_bonus,
+            "beer_karma": (
+                karma_by_participant[participant.id]["post_count"]
+                + karma_by_participant[participant.id]["upvote_count"]
+                + participant.beer_karma_bonus
+            ),
             "availability": {day.isoformat(): status for day, status in status_by_person[participant.id].items()},
         } for participant in participants],
         "proposals": proposal_results,
+        "bets": bet_results,
     }

@@ -7,7 +7,7 @@
     <p class="eyebrow">Trip ideas</p>
     <h1>Beer Karma</h1>
     <p>{{ trip.title }}’s extremely serious ranking of who has posted the most compelling questionable plans.</p>
-    <p class="leaderboard-rule">1 point per post + 1 point per upvote received. Ties go to more upvotes, then more posts.</p>
+    <p class="leaderboard-rule">1 point per post, received upvote, or correctly settled Beer Bet. Ties go to more bet wins, then upvotes, then posts.</p>
   </section>
 
   <section class="leaderboard-card card" aria-labelledby="leaderboard-title">
@@ -18,7 +18,7 @@
           <li class="leaderboard-entry {% if entry.rank == 1 %}leaderboard-leader{% endif %}">
             <span class="leaderboard-rank">{% if entry.rank == 1 %}👑{% else %}{{ entry.rank }}{% endif %}</span>
             <div class="leaderboard-person"><strong>{{ entry.name }}</strong><span>{{ entry.title }}</span></div>
-            <div class="leaderboard-stats"><span>{{ entry.post_count }} post{{ entry.post_count|pluralize }}</span><span>{{ entry.upvote_count }} upvote{{ entry.upvote_count|pluralize }}</span></div>
+            <div class="leaderboard-stats"><span>{{ entry.post_count }} post{{ entry.post_count|pluralize }}</span><span>{{ entry.upvote_count }} upvote{{ entry.upvote_count|pluralize }}</span><span>{{ entry.bet_karma }} bet win{{ entry.bet_karma|pluralize }}</span></div>
             <strong class="karma-score">{{ entry.karma }} <span>karma</span></strong>
           </li>
         {% endfor %}
