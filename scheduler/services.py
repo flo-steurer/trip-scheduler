@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import timedelta
-from math import ceil
 
 from .models import Availability, Proposal
 
@@ -31,19 +30,26 @@ def trip_results(trip):
     for duration_days in range(trip.minimum_duration_days, trip.maximum_duration_days + 1):
         for offset in range(len(days) - duration_days + 1):
             window_days = days[offset:offset + duration_days]
-            confirmed, possible, partial, strong_attendees = [], [], [], []
+            confirmed, possible, partial, eligible_attendees, below_minimum = [], [], [], [], []
             available_person_days = 0
             maybe_person_days = 0
-            strong_attendance_threshold = ceil(duration_days * 1.5)
             for participant in participants:
                 statuses = [status_by_person[participant.id].get(day, "unmarked") for day in window_days]
                 available_days = statuses.count(Availability.Status.AVAILABLE)
                 maybe_days = statuses.count(Availability.Status.MAYBE)
                 weighted_attendance = available_days * 2 + maybe_days
+                minimum_score = participant.minimum_attendance_days * 2
+                if weighted_attendance < minimum_score:
+                    below_minimum.append({
+                        "name": participant.name,
+                        "available_days": available_days,
+                        "maybe_days": maybe_days,
+                        "minimum_days": participant.minimum_attendance_days,
+                    })
+                    continue
                 available_person_days += available_days
                 maybe_person_days += maybe_days
-                if weighted_attendance >= strong_attendance_threshold:
-                    strong_attendees.append(participant.name)
+                eligible_attendees.append(participant.name)
                 if all(status == Availability.Status.AVAILABLE for status in statuses):
                     confirmed.append(participant.name)
                 elif all(status in (Availability.Status.AVAILABLE, Availability.Status.MAYBE) for status in statuses):
@@ -67,8 +73,9 @@ def trip_results(trip):
                 "confirmed_count": len(confirmed),
                 "possible_count": len(possible),
                 "partial": partial,
-                "strong_attendees": strong_attendees,
-                "strong_attendee_count": len(strong_attendees),
+                "eligible_attendees": eligible_attendees,
+                "eligible_attendee_count": len(eligible_attendees),
+                "below_minimum": below_minimum,
                 "available_person_days": available_person_days,
                 "maybe_person_days": maybe_person_days,
                 "attendance_score": attendance_score,
@@ -78,7 +85,7 @@ def trip_results(trip):
     windows.sort(key=lambda item: (
         -item["attendance_rate_value"],
         abs(item["duration_days"] - trip.ideal_duration_days),
-        -item["strong_attendee_count"],
+        -item["eligible_attendee_count"],
         item["start_date"],
     ))
     for window in windows:
@@ -114,6 +121,7 @@ def trip_results(trip):
         "participants": [{
             "id": participant.id,
             "name": participant.name,
+            "minimum_attendance_days": participant.minimum_attendance_days,
             "availability": {day.isoformat(): status for day, status in status_by_person[participant.id].items()},
         } for participant in participants],
         "proposals": proposal_results,

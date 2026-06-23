@@ -38,6 +38,11 @@
         <input id="participant-name" maxlength="80" autocomplete="name" placeholder="e.g. Sam">
         <button id="save-name" class="button small" type="button">Save</button>
       </div>
+      <div class="minimum-attendance-row">
+        <div><label for="minimum-attendance">Minimum days I’d join for</label><p>Windows below this are not counted for you.</p></div>
+        <input id="minimum-attendance" type="range" min="1" max="{{ trip.maximum_duration_days }}" value="1">
+        <output id="minimum-attendance-value" for="minimum-attendance">1 day</output>
+      </div>
       <p class="help" id="name-help">Choose a name, then tap dates to cycle through the options.</p>
       <div class="legend" aria-label="Availability statuses">
         <span><i class="dot available"></i>Available</span><span><i class="dot maybe"></i>Maybe</span><span><i class="dot unavailable"></i>Unavailable</span><span><i class="dot unmarked"></i>Unmarked</span>
@@ -48,29 +53,36 @@
     <aside class="card results-card" aria-labelledby="best-dates-title">
       <p class="eyebrow">Group overlap</p>
       <h2 id="best-dates-title">Best dates</h2>
-      <p class="help">Across {{ trip.minimum_duration_days }}–{{ trip.maximum_duration_days }} days, ranked by attendance rate. A “maybe” counts as half a day; a strong attendee can make at least 75% of the trip. Your {{ trip.ideal_duration_days }}-day ideal breaks ties.</p>
+      <p class="help">Across {{ trip.minimum_duration_days }}–{{ trip.maximum_duration_days }} days, ranked by attendance rate. A “maybe” counts as half a day; only participants meeting their own minimum are counted. Your {{ trip.ideal_duration_days }}-day ideal breaks ties.</p>
       <div id="best-windows" class="best-windows"></div>
     </aside>
   </div>
 
-  <section class="card aggregate-card" aria-labelledby="daily-title">
-    <div class="section-heading"><div><p class="eyebrow">At a glance</p><h2 id="daily-title">Daily overlap</h2></div><span id="participant-count" class="participant-count"></span></div>
-    <div id="daily-summary" class="daily-summary"></div>
-  </section>
+  <details class="card collapsible-section aggregate-card" data-collapsible="daily-overlap">
+    <summary aria-labelledby="daily-title">
+      <div class="section-heading"><div><p class="eyebrow">At a glance</p><h2 id="daily-title">Daily overlap</h2></div><span class="collapse-summary"><span id="participant-count">0 participants</span><span class="collapse-chevron">⌄</span></span></div>
+    </summary>
+    <div class="collapsible-content"><div id="daily-summary" class="daily-summary"></div></div>
+  </details>
 
-  <section class="card proposals-section" aria-labelledby="proposals-title">
-    <div class="section-heading"><div><p class="eyebrow">Trip ideas</p><h2 id="proposals-title">Where should we go?</h2></div><span id="proposal-state" class="save-state" aria-live="polite"></span></div>
-    <p class="help">Add a destination, villa, or any other idea. Everyone can support as many proposals as they like.</p>
-    <form id="proposal-form" class="proposal-form">
-      <label>Type<select id="proposal-type" required><option value="destination">Destination</option><option value="stay">Villa / stay</option><option value="other">Other idea</option></select></label>
-      <label class="proposal-title-field">Title<input id="proposal-title" maxlength="160" required placeholder="e.g. Villa overlooking Lake Garda"></label>
-      <label>Price <span class="optional">optional</span><input id="proposal-price" maxlength="100" placeholder="e.g. €3,200 / week"></label>
-      <label class="proposal-link-field">Link <span class="optional">optional</span><input id="proposal-url" type="url" maxlength="500" placeholder="https://…"></label>
-      <label class="proposal-note-field">Note <span class="optional">optional</span><textarea id="proposal-note" maxlength="1000" rows="2" placeholder="Why this one is worth a look"></textarea></label>
-      <div class="proposal-form-actions"><button id="proposal-submit" class="button" type="submit">Add idea <span>+</span></button><button id="proposal-cancel" class="text-button" type="button" hidden>Cancel</button></div>
-    </form>
-    <div id="proposal-board" class="proposal-board"></div>
-  </section>
+  <details class="card collapsible-section proposals-section" data-collapsible="trip-ideas" open>
+    <summary aria-labelledby="proposals-title">
+      <div class="section-heading"><div><p class="eyebrow">Trip ideas</p><h2 id="proposals-title">Where should we go?</h2></div><span class="collapse-summary"><span id="proposal-summary">0 ideas · 0 upvotes</span><span class="collapse-chevron">⌄</span></span></div>
+    </summary>
+    <div class="collapsible-content">
+      <span id="proposal-state" class="save-state" aria-live="polite"></span>
+      <p class="help">Add a destination, villa, or any other idea. Everyone can support as many proposals as they like.</p>
+      <form id="proposal-form" class="proposal-form">
+        <label>Type<select id="proposal-type" required><option value="destination">Destination</option><option value="stay">Villa / stay</option><option value="other">Other idea</option></select></label>
+        <label class="proposal-title-field">Title<input id="proposal-title" maxlength="160" required placeholder="e.g. Villa overlooking Lake Garda"></label>
+        <label>Price <span class="optional">optional</span><input id="proposal-price" maxlength="100" placeholder="e.g. €3,200 / week"></label>
+        <label class="proposal-link-field">Link <span class="optional">optional</span><input id="proposal-url" type="url" maxlength="500" placeholder="https://…"></label>
+        <label class="proposal-note-field">Note <span class="optional">optional</span><textarea id="proposal-note" maxlength="1000" rows="2" placeholder="Why this one is worth a look"></textarea></label>
+        <div class="proposal-form-actions"><button id="proposal-submit" class="button" type="submit">Add idea <span>+</span></button><button id="proposal-cancel" class="text-button" type="button" hidden>Cancel</button></div>
+      </form>
+      <div id="proposal-board" class="proposal-board"></div>
+    </div>
+  </details>
 
   <section class="people-section" aria-labelledby="people-title">
     <div class="section-heading"><div><p class="eyebrow">The group</p><h2 id="people-title">Everyone’s calendars</h2></div></div>

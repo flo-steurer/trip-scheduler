@@ -57,6 +57,7 @@ class Participant(models.Model):
     trip = models.ForeignKey(Trip, related_name="participants", on_delete=models.CASCADE)
     name = models.CharField(max_length=80)
     normalized_name = models.CharField(max_length=80)
+    minimum_attendance_days = models.PositiveSmallIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -69,6 +70,10 @@ class Participant(models.Model):
         self.name = self.name.strip()
         self.normalized_name = self.name.casefold()
         super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.minimum_attendance_days > self.trip.maximum_duration_days:
+            raise ValidationError({"minimum_attendance_days": "This cannot exceed the trip's maximum length."})
 
     def __str__(self):
         return f"{self.name} ({self.trip})"

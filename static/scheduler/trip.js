@@ -5,10 +5,13 @@
   const initialResults = JSON.parse(document.querySelector('#initial-results').textContent);
   const stateCycle = ['unmarked', 'available', 'maybe', 'unavailable'];
   const nameInput = document.querySelector('#participant-name');
+  const minimumAttendanceInput = document.querySelector('#minimum-attendance');
+  const minimumAttendanceValue = document.querySelector('#minimum-attendance-value');
   const calendar = document.querySelector('#calendar');
   const saveState = document.querySelector('#save-state');
   const proposalForm = document.querySelector('#proposal-form');
   const proposalState = document.querySelector('#proposal-state');
+  const proposalSummary = document.querySelector('#proposal-summary');
   const proposalSubmit = document.querySelector('#proposal-submit');
   const proposalCancel = document.querySelector('#proposal-cancel');
   const storageKey = `trip-scheduler:${app.dataset.tripId}:name`;
@@ -34,6 +37,27 @@
   function setProposalState(message, error = false) {
     proposalState.textContent = message;
     proposalState.classList.toggle('error', error);
+  }
+
+  function minimumAttendanceLabel(value) {
+    return `${value} day${Number(value) === 1 ? '' : 's'}`;
+  }
+
+  function renderMinimumAttendance() {
+    const value = ownParticipant()?.minimum_attendance_days || 1;
+    minimumAttendanceInput.value = value;
+    minimumAttendanceValue.textContent = minimumAttendanceLabel(value);
+  }
+
+  function setupCollapsibles() {
+    document.querySelectorAll('[data-collapsible]').forEach((section) => {
+      const key = `trip-scheduler:${app.dataset.tripId}:section:${section.dataset.collapsible}`;
+      const savedState = localStorage.getItem(key);
+      if (savedState !== null) section.open = savedState === 'open';
+      section.addEventListener('toggle', () => {
+        localStorage.setItem(key, section.open ? 'open' : 'closed');
+      });
+    });
   }
 
   async function request(url, payload, method = 'POST') {
@@ -125,7 +149,7 @@
       title.textContent = `${readableDate(window.start_date)} – ${readableDate(window.end_date)} · ${window.duration_days} days`;
       const scores = document.createElement('div'); scores.className = 'window-scores';
       scores.append(badge('attendance', `${window.attendance_rate}%`, 'available'));
-      scores.append(badge('strong attendees', window.strong_attendee_count, 'available'));
+      scores.append(badge('eligible', window.eligible_attendee_count, 'available'));
       scores.append(badge('yes', window.confirmed_count, 'available'));
       if (window.possible_count) scores.append(badge('maybe', window.possible_count, 'maybe'));
       scores.append(badge('available days', window.available_person_days, 'available'));
@@ -135,7 +159,8 @@
       const confirmed = window.confirmed.length ? `In: ${window.confirmed.join(', ')}` : 'No confirmed attendees yet';
       const possible = window.possible.length ? ` · Maybe: ${window.possible.join(', ')}` : '';
       const partial = window.partial.length ? ` · Partial: ${window.partial.map((person) => `${person.name} (${person.available_days} days)`).join(', ')}` : '';
-      names.textContent = confirmed + possible + partial;
+      const belowMinimum = window.below_minimum.length ? ` · Not counted: ${window.below_minimum.map((person) => `${person.name} (${person.available_days} / min ${person.minimum_days} days)`).join(', ')}` : '';
+      names.textContent = confirmed + possible + partial + belowMinimum;
       details.append(names); card.append(rank, details); windows.append(card);
     });
 
@@ -148,6 +173,7 @@
       cell.append(date, total, maybe); daily.append(cell);
     });
     document.querySelector('#participant-count').textContent = `${results.participants.length} participant${results.participants.length === 1 ? '' : 's'}`;
+    renderMinimumAttendance();
     renderPeople();
     renderProposals();
   }
@@ -182,6 +208,8 @@
   function renderProposals() {
     const board = document.querySelector('#proposal-board');
     board.replaceChildren();
+    const voteCount = results.proposals.reduce((total, proposal) => total + proposal.vote_count, 0);
+    proposalSummary.textContent = `${results.proposals.length} idea${results.proposals.length === 1 ? '' : 's'} · ${voteCount} upvote${voteCount === 1 ? '' : 's'}`;
     if (!results.proposals.length) {
       const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No ideas yet — add the first one.'; board.append(empty); return;
     }
@@ -323,8 +351,35 @@
     finally { submitting = false; }
   }
 
+  async function updateMinimumAttendance() {
+    const name = currentName();
+    if (!name) {
+      setSaveState('Save your name before choosing a minimum.', true);
+      renderMinimumAttendance();
+      nameInput.focus();
+      return;
+    }
+    if (submitting) return;
+    submitting = true; setSaveState('Saving…');
+    try {
+      const data = await request(app.dataset.participantUrl, {
+        name,
+        minimum_attendance_days: Number(minimumAttendanceInput.value),
+      });
+      nameInput.value = data.participant.name;
+      localStorage.setItem(storageKey, data.participant.name);
+      results = data.results;
+      renderCalendar(); renderResults(); setSaveState('Saved');
+    } catch (error) {
+      setSaveState(error.message, true);
+      renderMinimumAttendance();
+    } finally { submitting = false; }
+  }
+
   document.querySelector('#save-name').addEventListener('click', saveName);
   nameInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); saveName(); } });
+  minimumAttendanceInput.addEventListener('input', () => { minimumAttendanceValue.textContent = minimumAttendanceLabel(minimumAttendanceInput.value); });
+  minimumAttendanceInput.addEventListener('change', updateMinimumAttendance);
   proposalForm.addEventListener('submit', submitProposal);
   proposalCancel.addEventListener('click', resetProposalForm);
   document.querySelector('#copy-link').addEventListener('click', async (event) => {
@@ -335,5 +390,6 @@
   });
 
   nameInput.value = localStorage.getItem(storageKey) || '';
+  setupCollapsibles();
   renderCalendar(); renderResults();
 })();

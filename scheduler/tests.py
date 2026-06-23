@@ -55,6 +55,8 @@ class TripFormTests(TestCase):
         self.assertContains(response, 'href="/static/scheduler/app.css"')
         self.assertContains(response, 'src="/static/scheduler/trip.js"')
         self.assertIn("csrftoken", response.cookies)
+        self.assertContains(response, 'data-collapsible="daily-overlap"')
+        self.assertContains(response, 'data-collapsible="trip-ideas" open')
 
     @override_settings(PUBLIC_BASE_URL="http://100.64.0.10:8000")
     def test_trip_page_uses_configured_public_share_url(self):
@@ -165,7 +167,7 @@ class ResultsTests(TestCase, TripFactoryMixin):
         windows = trip_results(trip)["windows"]
         self.assertEqual(windows[0]["duration_days"], 3)
         self.assertEqual(windows[0]["attendance_rate"], 100)
-        self.assertEqual(windows[0]["strong_attendee_count"], 2)
+        self.assertEqual(windows[0]["eligible_attendee_count"], 2)
         self.assertEqual({window["duration_days"] for window in windows}, {2, 3, 4})
 
     def test_normalized_attendance_rate_prevents_longer_windows_from_auto_winning(self):
@@ -183,6 +185,21 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(windows[0]["attendance_rate"], 100)
         self.assertEqual(windows[1]["duration_days"], 3)
         self.assertLess(windows[1]["attendance_rate"], windows[0]["attendance_rate"])
+
+    def test_attendance_below_personal_minimum_is_not_scored(self):
+        trip = self.make_trip(end_date=date(2026, 7, 3), duration_days=3)
+        ari = self.person(trip, "Ari", {date(2026, 7, day): "available" for day in range(1, 4)})
+        bea = self.person(trip, "Bea", {date(2026, 7, 1): "available"})
+        bea.minimum_attendance_days = 2
+        bea.save(update_fields=["minimum_attendance_days"])
+
+        window = trip_results(trip)["windows"][0]
+        self.assertEqual(window["eligible_attendees"], [ari.name])
+        self.assertEqual(window["available_person_days"], 3)
+        self.assertEqual(window["attendance_rate"], 50)
+        self.assertEqual(window["below_minimum"], [{
+            "name": "Bea", "available_days": 1, "maybe_days": 0, "minimum_days": 2,
+        }])
 
     def test_proposals_are_ranked_by_upvotes_and_expose_voters(self):
         trip = self.make_trip()
@@ -294,8 +311,15 @@ class AvailabilityApiTests(TestCase, TripFactoryMixin):
 
     def test_participant_endpoint_returns_existing_person_and_results(self):
         url = reverse("participant_api", args=[self.trip.public_id])
-        response = self.client.post(url, data=json.dumps({"name": "Kei"}), content_type="application/json")
+        response = self.client.post(url, data=json.dumps({"name": "Kei", "minimum_attendance_days": 2}), content_type="application/json")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["participant"]["name"], "Kei")
+        self.assertEqual(payload["participant"]["minimum_attendance_days"], 2)
         self.assertIn("windows", payload["results"])
+
+    def test_participant_endpoint_rejects_minimum_above_trip_maximum(self):
+        url = reverse("participant_api", args=[self.trip.public_id])
+        response = self.client.post(url, data=json.dumps({"name": "Kei", "minimum_attendance_days": 4}), content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Participant.objects.count(), 1)

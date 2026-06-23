@@ -47,6 +47,28 @@ def _participant_for_name(trip, name):
     return participant, None
 
 
+def _minimum_attendance_days(trip, value):
+    if value is None:
+        return None, None
+    if isinstance(value, bool):
+        return None, "Minimum attendance must be a whole number."
+    try:
+        minimum_days = int(value)
+    except (TypeError, ValueError):
+        return None, "Minimum attendance must be a whole number."
+    if minimum_days < 1 or minimum_days > trip.maximum_duration_days:
+        return None, f"Choose between 1 and {trip.maximum_duration_days} days."
+    return minimum_days, None
+
+
+def _participant_payload(participant):
+    return {
+        "id": participant.id,
+        "name": participant.name,
+        "minimum_attendance_days": participant.minimum_attendance_days,
+    }
+
+
 def _results_response(trip, **extra):
     payload = {"results": trip_results(trip)}
     payload.update(extra)
@@ -118,7 +140,13 @@ def participant_api(request, public_id):
     participant, error = _participant_for_name(trip, body.get("name"))
     if error:
         return JsonResponse({"error": error}, status=400)
-    return _results_response(trip, participant={"id": participant.id, "name": participant.name})
+    minimum_days, error = _minimum_attendance_days(trip, body.get("minimum_attendance_days"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    if minimum_days is not None and participant.minimum_attendance_days != minimum_days:
+        participant.minimum_attendance_days = minimum_days
+        participant.save(update_fields=["minimum_attendance_days"])
+    return _results_response(trip, participant=_participant_payload(participant))
 
 
 @require_POST
@@ -147,7 +175,7 @@ def availability_api(request, public_id):
     else:
         return JsonResponse({"error": "Unknown availability status."}, status=400)
 
-    return _results_response(trip, participant={"id": participant.id, "name": participant.name})
+    return _results_response(trip, participant=_participant_payload(participant))
 
 
 @require_GET
@@ -168,7 +196,7 @@ def proposal_collection_api(request, public_id):
     if error:
         return JsonResponse({"error": error}, status=400)
     Proposal.objects.create(trip=trip, submitted_by=participant, **fields)
-    return _results_response(trip, participant={"id": participant.id, "name": participant.name})
+    return _results_response(trip, participant=_participant_payload(participant))
 
 
 @require_http_methods(["PATCH", "DELETE"])
@@ -210,4 +238,4 @@ def proposal_vote_api(request, public_id, proposal_id):
         vote.delete()
     else:
         ProposalVote.objects.create(proposal=proposal, participant=participant)
-    return _results_response(trip, participant={"id": participant.id, "name": participant.name})
+    return _results_response(trip, participant=_participant_payload(participant))
