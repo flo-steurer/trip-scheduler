@@ -152,6 +152,9 @@ class ResultsTests(TestCase, TripFactoryMixin):
         windows = trip_results(trip)["windows"]
         self.assertEqual(windows[0]["start_date"], "2026-09-05")
         self.assertEqual(windows[0]["available_person_days"], 25)
+        self.assertEqual(windows[0]["minimum_villa_occupancy"], 3)
+        self.assertEqual(windows[0]["maximum_villa_capacity"], 4)
+        self.assertEqual(windows[0]["average_villa_fill"], 89)
         self.assertEqual(windows[0]["partial"], [{"name": "Alex", "available_days": 4, "maybe_days": 0}])
 
     def test_variable_durations_prefer_ideal_when_attendance_rates_tie(self):

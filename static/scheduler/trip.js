@@ -219,6 +219,13 @@
     return element;
   }
 
+  function metricBadge(text, kind) {
+    const element = document.createElement('span');
+    element.className = `count-badge ${kind}`;
+    element.textContent = text;
+    return element;
+  }
+
   function attendanceLine(label, values, kind) {
     const line = document.createElement('div'); line.className = `attendance-line ${kind}`;
     const labelElement = document.createElement('span'); labelElement.className = 'attendance-label'; labelElement.textContent = label;
@@ -242,17 +249,17 @@
       title.textContent = `${readableDate(window.start_date)} – ${readableDate(window.end_date)} · ${window.duration_days} days`;
       const scores = document.createElement('div'); scores.className = 'window-scores';
       scores.append(badge('attendance', `${window.attendance_rate}%`, 'available'));
-      scores.append(badge('eligible', window.eligible_attendee_count, 'available'));
-      scores.append(badge('yes', window.confirmed_count, 'available'));
-      if (window.possible_count) scores.append(badge('maybe', window.possible_count, 'maybe'));
-      scores.append(badge('available days', window.available_person_days, 'available'));
-      if (window.maybe_person_days) scores.append(badge('maybe days', window.maybe_person_days, 'maybe'));
+      const villaRange = window.minimum_villa_occupancy === window.maximum_villa_capacity
+        ? `${window.maximum_villa_capacity} guests/day`
+        : `${window.minimum_villa_occupancy}–${window.maximum_villa_capacity} guests/day`;
+      scores.append(metricBadge(villaRange, 'villa'));
+      scores.append(metricBadge(`${window.average_villa_fill}% filled`, 'villa'));
       details.append(title, scores);
       const breakdown = document.createElement('div'); breakdown.className = 'attendance-breakdown';
-      if (window.confirmed.length) breakdown.append(attendanceLine('Confirmed', window.confirmed, 'confirmed'));
-      if (window.possible.length) breakdown.append(attendanceLine('Maybe', window.possible, 'maybe'));
-      if (window.partial.length) breakdown.append(attendanceLine('Partial', window.partial.map((person) => `${person.name} · ${person.available_days} days`), 'partial'));
-      if (window.below_minimum.length) breakdown.append(attendanceLine('Not counted', window.below_minimum.map((person) => `${person.name} · ${person.available_days}/${person.minimum_days} days`), 'excluded'));
+      if (window.confirmed.length) breakdown.append(attendanceLine(`Confirmed (${window.confirmed_count})`, window.confirmed, 'confirmed'));
+      if (window.possible.length) breakdown.append(attendanceLine(`Maybe (${window.possible_count})`, window.possible, 'maybe'));
+      if (window.partial.length) breakdown.append(attendanceLine(`Partial (${window.partial.length})`, window.partial.map((person) => `${person.name} · ${person.available_days} days`), 'partial'));
+      if (window.below_minimum.length) breakdown.append(attendanceLine(`Not counted (${window.below_minimum.length})`, window.below_minimum.map((person) => `${person.name} · ${person.available_days}/${person.minimum_days} days`), 'excluded'));
       if (!breakdown.children.length) breakdown.append(attendanceLine('Attendance', ['No eligible attendees yet'], 'excluded'));
       details.append(breakdown); card.append(rank, details); windows.append(card);
     });
