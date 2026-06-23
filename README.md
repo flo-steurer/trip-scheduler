@@ -24,3 +24,5 @@ python3 -m venv .venv
 This is intentionally access-free: anyone who has a trip URL can see the group’s responses and can submit under any display name. Use it only on your trusted private network.
 
 If an outside user gets a 404 before any request appears in `docker compose logs`, their VPN/reverse-proxy route is not reaching this container. Confirm that `http://<server-vpn-address>:8000/` is reachable first; if a reverse proxy is in front, forward its site to `http://127.0.0.1:8000` and use that public origin as `PUBLIC_BASE_URL`.
+
+Do not expose Gunicorn directly to the public internet. Place it behind a VPN or a reverse proxy (such as Caddy or Nginx) with HTTPS and request time limits. The container uses threaded Gunicorn workers so one slow/incomplete client connection does not block every availability update, but a reverse proxy remains the proper network boundary.
