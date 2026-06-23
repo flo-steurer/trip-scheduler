@@ -45,6 +45,7 @@ class TripFormTests(TestCase):
         self.assertIsNotNone(finders.find("scheduler/trip.js"))
         self.assertIsNotNone(finders.find("scheduler/beermarket.js"))
         self.assertIsNotNone(finders.find("scheduler/chip_leaderboard.js"))
+        self.assertIsNotNone(finders.find("scheduler/favicon.svg"))
 
     def test_calendar_uses_millisecond_chip_balances(self):
         with open(finders.find("scheduler/trip.js"), encoding="utf-8") as script:
@@ -77,6 +78,7 @@ class TripFormTests(TestCase):
         )
         response = self.client.get(reverse("trip_detail", args=[trip.public_id]))
         self.assertContains(response, 'href="/static/scheduler/app.css"')
+        self.assertContains(response, 'href="/static/scheduler/favicon.svg"')
         self.assertContains(response, 'src="/static/scheduler/trip.js"')
         self.assertIn("csrftoken", response.cookies)
         self.assertContains(response, 'data-collapsible="daily-overlap"')
