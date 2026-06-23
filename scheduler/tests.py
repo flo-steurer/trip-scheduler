@@ -95,6 +95,26 @@ class TripFormTests(TestCase):
         self.assertContains(response, "Beermarket")
         self.assertContains(response, 'src="/static/scheduler/beermarket.js"')
 
+    def test_trip_pages_share_the_same_navigation(self):
+        trip = Trip.objects.create(
+            title="Island escape",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 8),
+            minimum_duration_days=4,
+            ideal_duration_days=4,
+            maximum_duration_days=4,
+        )
+        pages = ("trip_detail", "beermarket", "leaderboard", "chip_leaderboard")
+        navigation = ("trip_detail", "beermarket", "leaderboard", "chip_leaderboard", "home")
+
+        for page in pages:
+            response = self.client.get(reverse(page, args=[trip.public_id]))
+            self.assertEqual(response.status_code, 200)
+            for destination in navigation:
+                args = [trip.public_id] if destination != "home" else []
+                self.assertContains(response, reverse(destination, args=args))
+            self.assertContains(response, 'class="trip-nav-link active"')
+
     @override_settings(PUBLIC_BASE_URL="http://100.64.0.10:8000")
     def test_trip_page_uses_configured_public_share_url(self):
         trip = Trip.objects.create(

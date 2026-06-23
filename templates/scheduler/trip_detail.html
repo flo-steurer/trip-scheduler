@@ -1,7 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
 {% block title %}{{ trip.title }} · Trip Scheduler{% endblock %}
-{% block header_action %}<span class="header-links"><a class="text-link" href="{% url 'beermarket' trip.public_id %}">Beermarket</a><a class="text-link" href="{% url 'leaderboard' trip.public_id %}">Idea leaderboard</a><a class="text-link" href="{% url 'chip_leaderboard' trip.public_id %}">Chip leaderboard</a><a class="text-link" href="{% url 'home' %}">Create another trip</a></span>{% endblock %}
 {% block content %}
 <div class="shell trip-shell" id="trip-app"
      data-trip-id="{{ trip.public_id }}"
