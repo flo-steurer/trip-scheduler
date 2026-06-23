@@ -134,6 +134,14 @@
     return element;
   }
 
+  function attendanceLine(label, values, kind) {
+    const line = document.createElement('div'); line.className = `attendance-line ${kind}`;
+    const labelElement = document.createElement('span'); labelElement.className = 'attendance-label'; labelElement.textContent = label;
+    const valuesElement = document.createElement('span'); valuesElement.className = 'attendance-values'; valuesElement.textContent = values.join(', ');
+    line.append(labelElement, valuesElement);
+    return line;
+  }
+
   function renderResults() {
     const windows = document.querySelector('#best-windows');
     windows.replaceChildren();
@@ -155,13 +163,13 @@
       scores.append(badge('available days', window.available_person_days, 'available'));
       if (window.maybe_person_days) scores.append(badge('maybe days', window.maybe_person_days, 'maybe'));
       details.append(title, scores);
-      const names = document.createElement('p'); names.className = 'window-names';
-      const confirmed = window.confirmed.length ? `In: ${window.confirmed.join(', ')}` : 'No confirmed attendees yet';
-      const possible = window.possible.length ? ` · Maybe: ${window.possible.join(', ')}` : '';
-      const partial = window.partial.length ? ` · Partial: ${window.partial.map((person) => `${person.name} (${person.available_days} days)`).join(', ')}` : '';
-      const belowMinimum = window.below_minimum.length ? ` · Not counted: ${window.below_minimum.map((person) => `${person.name} (${person.available_days} / min ${person.minimum_days} days)`).join(', ')}` : '';
-      names.textContent = confirmed + possible + partial + belowMinimum;
-      details.append(names); card.append(rank, details); windows.append(card);
+      const breakdown = document.createElement('div'); breakdown.className = 'attendance-breakdown';
+      if (window.confirmed.length) breakdown.append(attendanceLine('Confirmed', window.confirmed, 'confirmed'));
+      if (window.possible.length) breakdown.append(attendanceLine('Maybe', window.possible, 'maybe'));
+      if (window.partial.length) breakdown.append(attendanceLine('Partial', window.partial.map((person) => `${person.name} · ${person.available_days} days`), 'partial'));
+      if (window.below_minimum.length) breakdown.append(attendanceLine('Not counted', window.below_minimum.map((person) => `${person.name} · ${person.available_days}/${person.minimum_days} days`), 'excluded'));
+      if (!breakdown.children.length) breakdown.append(attendanceLine('Attendance', ['No eligible attendees yet'], 'excluded'));
+      details.append(breakdown); card.append(rank, details); windows.append(card);
     });
 
     const daily = document.querySelector('#daily-summary'); daily.replaceChildren();
@@ -187,6 +195,7 @@
     results.participants.forEach((person) => {
       const card = document.createElement('article'); card.className = 'person-card';
       const name = document.createElement('h3'); name.textContent = person.name; card.append(name);
+      const minimum = document.createElement('p'); minimum.className = 'participant-minimum'; minimum.textContent = `Minimum: ${minimumAttendanceLabel(person.minimum_attendance_days)}`; card.append(minimum);
       const mini = document.createElement('div'); mini.className = 'mini-calendar';
       for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
         const iso = isoDate(cursor); const status = person.availability[iso] || 'unmarked';
