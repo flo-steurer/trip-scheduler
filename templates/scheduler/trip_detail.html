@@ -11,6 +11,7 @@
      data-start-date="{{ trip.start_date|date:'Y-m-d' }}"
      data-end-date="{{ trip.end_date|date:'Y-m-d' }}"
      data-duration="{{ trip.duration_days }}">
+  <div hidden>{% csrf_token %}</div>
   <section class="trip-heading">
     <div>
       <p class="eyebrow">Shared trip calendar</p>
@@ -19,7 +20,7 @@
     </div>
     <div class="share-box">
       <span>Share this link</span>
-      <div><input id="share-url" value="{{ request.build_absolute_uri }}" readonly aria-label="Trip sharing URL"><button id="copy-link" class="copy-button" type="button">Copy</button></div>
+      <div><input id="share-url" value="{{ share_url }}" readonly aria-label="Trip sharing URL"><button id="copy-link" class="copy-button" type="button">Copy</button></div>
     </div>
   </section>
 

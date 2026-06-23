@@ -2,6 +2,7 @@ import json
 from datetime import date
 
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
 from django.contrib.staticfiles import finders
 
@@ -42,6 +43,18 @@ class TripFormTests(TestCase):
         response = self.client.get(reverse("trip_detail", args=[trip.public_id]))
         self.assertContains(response, 'href="/static/scheduler/app.css"')
         self.assertContains(response, 'src="/static/scheduler/trip.js"')
+        self.assertIn("csrftoken", response.cookies)
+
+    @override_settings(PUBLIC_BASE_URL="http://100.64.0.10:8000")
+    def test_trip_page_uses_configured_public_share_url(self):
+        trip = Trip.objects.create(
+            title="Island escape",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 8),
+            duration_days=4,
+        )
+        response = self.client.get(reverse("trip_detail", args=[trip.public_id]))
+        self.assertContains(response, f'value="http://100.64.0.10:8000/trips/{trip.public_id}/"')
 
     def test_create_trip_redirects_to_opaque_public_url(self):
         response = self.client.post(reverse("create_trip"), {

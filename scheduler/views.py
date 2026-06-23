@@ -1,9 +1,12 @@
 import json
 from datetime import date
+from urllib.parse import urljoin
 
+from django.conf import settings
 from django.db import IntegrityError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import TripForm
@@ -65,9 +68,12 @@ def create_trip(request):
 @require_GET
 def trip_detail(request, public_id):
     trip = _trip(public_id)
+    trip_path = reverse("trip_detail", args=[trip.public_id])
+    share_url = urljoin(f"{settings.PUBLIC_BASE_URL}/", trip_path.lstrip("/")) if settings.PUBLIC_BASE_URL else request.build_absolute_uri(trip_path)
     return render(request, "scheduler/trip_detail.html", {
         "trip": trip,
         "initial_results": trip_results(trip),
+        "share_url": share_url,
     })
 
 

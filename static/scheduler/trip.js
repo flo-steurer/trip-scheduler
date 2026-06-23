@@ -11,7 +11,7 @@
   let results = initialResults;
   let submitting = false;
 
-  const csrfToken = () => document.cookie.split('; ').find((row) => row.startsWith('csrftoken='))?.split('=')[1] || '';
+  const csrfToken = () => document.querySelector('[name="csrfmiddlewaretoken"]')?.value || '';
   const isoDate = (value) => value.toISOString().slice(0, 10);
   const localDate = (iso) => new Date(`${iso}T12:00:00`);
   const currentName = () => nameInput.value.trim();
@@ -32,8 +32,10 @@
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+    const isJson = response.headers.get('content-type')?.includes('application/json');
+    const data = isJson ? await response.json() : null;
+    if (!response.ok) throw new Error(data?.error || `Request failed (HTTP ${response.status}).`);
+    if (!data) throw new Error('The server returned an unexpected response.');
     return data;
   }
 
