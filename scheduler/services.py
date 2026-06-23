@@ -189,20 +189,29 @@ def trip_results(trip):
             "timestamp": market.created_at.isoformat(),
             "yes_odds": 50,
         }]
-        positions = defaultdict(lambda: {"yes_shares": 0, "no_shares": 0})
+        positions = defaultdict(lambda: {
+            "yes_shares": 0,
+            "no_shares": 0,
+            "yes_entry_total": 0,
+            "no_entry_total": 0,
+        })
         for trade in trades:
             position = positions[trade.participant_id]
             position["name"] = trade.participant.name
             if trade.outcome == "yes":
                 yes_chips += trade.chips
                 position["yes_shares"] += trade.chips
+                position["yes_entry_total"] += trade.chips * trade.entry_odds
             else:
                 no_chips += trade.chips
                 position["no_shares"] += trade.chips
+                position["no_entry_total"] += trade.chips * trade.entry_odds
             odds_history.append({
                 "timestamp": trade.created_at.isoformat(),
                 "yes_odds": round(yes_chips / (yes_chips + no_chips) * 100),
             })
+        yes_payouts = market.payout_distribution(trades, "yes")
+        no_payouts = market.payout_distribution(trades, "no")
         payouts = market.payout_distribution(trades, market.resolved_outcome) if market.is_resolved else {}
         market_results.append({
             "id": market.id,
@@ -219,6 +228,10 @@ def trip_results(trip):
                 "yes_shares": shares["yes_shares"],
                 "no_shares": shares["no_shares"],
                 "stake": shares["yes_shares"] + shares["no_shares"],
+                "yes_entry_odds": round(shares["yes_entry_total"] / shares["yes_shares"]) if shares["yes_shares"] else None,
+                "no_entry_odds": round(shares["no_entry_total"] / shares["no_shares"]) if shares["no_shares"] else None,
+                "yes_payout": yes_payouts.get(participant_id, 0),
+                "no_payout": no_payouts.get(participant_id, 0),
                 "payout": payouts.get(participant_id, 0),
             } for participant_id, shares in sorted(
                 positions.items(),

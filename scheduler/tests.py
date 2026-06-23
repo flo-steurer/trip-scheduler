@@ -280,11 +280,13 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         participant = Participant.objects.get()
         self.assertEqual(participant.beer_chips, 7)
         self.assertEqual(MarketTrade.objects.get().outcome, "yes")
+        self.assertEqual(MarketTrade.objects.get().entry_odds, 50)
         market = first.json()["results"]["markets"][0]
         self.assertEqual(market["yes_odds"], 57)
         self.assertEqual(len(market["odds_history"]), 2)
         self.assertEqual(market["positions"], [{
-            "name": "Maya", "yes_shares": 3, "no_shares": 0, "stake": 3, "payout": 0,
+            "name": "Maya", "yes_shares": 3, "no_shares": 0, "stake": 3,
+            "yes_entry_odds": 50, "no_entry_odds": None, "yes_payout": 3, "no_payout": 0, "payout": 0,
         }])
 
     def test_resolution_pays_the_pool_to_winners_and_locks_the_market(self):

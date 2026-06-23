@@ -356,8 +356,18 @@ def market_trade_api(request, public_id, market_id):
             return JsonResponse({"error": "This World Cup market is no longer accepting trades."}, status=400)
         if chips > participant.beer_chips:
             return JsonResponse({"error": "You do not have that many Beer Chips."}, status=400)
+        existing_trades = list(market.trades.all())
+        yes_chips = market.seed_chips + sum(trade.chips for trade in existing_trades if trade.outcome == Market.Outcome.YES)
+        no_chips = market.seed_chips + sum(trade.chips for trade in existing_trades if trade.outcome == Market.Outcome.NO)
+        entry_odds = round((yes_chips if outcome == Market.Outcome.YES else no_chips) / (yes_chips + no_chips) * 100)
         participant.beer_chips -= chips
         participant.save(update_fields=["beer_chips"])
-        MarketTrade.objects.create(market=market, participant=participant, outcome=outcome, chips=chips)
+        MarketTrade.objects.create(
+            market=market,
+            participant=participant,
+            outcome=outcome,
+            chips=chips,
+            entry_odds=entry_odds,
+        )
     _activity(request, participant, f"market_trade_bought_{outcome}_{chips}")
     return _results_response(trip, participant=_participant_payload(participant))

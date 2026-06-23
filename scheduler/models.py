@@ -217,6 +217,7 @@ class MarketTrade(models.Model):
     participant = models.ForeignKey(Participant, related_name="market_trades", on_delete=models.CASCADE)
     outcome = models.CharField(max_length=3, choices=Market.Outcome.choices)
     chips = models.PositiveSmallIntegerField()
+    entry_odds = models.PositiveSmallIntegerField(default=50)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -225,3 +226,5 @@ class MarketTrade(models.Model):
     def clean(self):
         if self.market_id and self.participant_id and self.market.trip_id != self.participant.trip_id:
             raise ValidationError({"participant": "Market trades must come from a participant in the same trip."})
+        if not 0 <= self.entry_odds <= 100:
+            raise ValidationError({"entry_odds": "Entry odds must be between 0 and 100."})

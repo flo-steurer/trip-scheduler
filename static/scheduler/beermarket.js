@@ -76,9 +76,23 @@
       const name = document.createElement('strong'); name.textContent = position.name;
       const amount = document.createElement('span'); amount.textContent = `${position.stake} chip${position.stake === 1 ? '' : 's'}`;
       top.append(name, amount);
-      const detail = document.createElement('span'); detail.className = 'market-stake-detail';
-      detail.textContent = market.is_resolved ? `Payout: ${position.payout} chip${position.payout === 1 ? '' : 's'}${position.payout ? ' · +1 karma' : ''}` : `${position.yes_shares} Yes · ${position.no_shares} No`;
-      item.append(top, detail); list.append(item);
+      if (market.is_resolved) {
+        const detail = document.createElement('span'); detail.className = 'market-stake-detail';
+        detail.textContent = `Payout: ${position.payout} chip${position.payout === 1 ? '' : 's'}${position.payout ? ' · +1 karma' : ''}`;
+        item.append(top, detail);
+      } else {
+        const entries = document.createElement('div'); entries.className = 'market-stake-entries'; entries.style.display = 'grid'; entries.style.gap = '2px'; entries.style.marginTop = '3px'; entries.style.fontSize = '.67rem'; entries.style.fontWeight = '720';
+        if (position.yes_shares) {
+          const yes = document.createElement('span'); yes.className = 'yes'; yes.style.color = '#078357'; yes.textContent = `Yes ${position.yes_shares} @ ${position.yes_entry_odds}¢ → ${market.yes_odds}¢`; entries.append(yes);
+        }
+        if (position.no_shares) {
+          const no = document.createElement('span'); no.className = 'no'; no.style.color = '#b94d48'; no.textContent = `No ${position.no_shares} @ ${position.no_entry_odds}¢ → ${market.no_odds}¢`; entries.append(no);
+        }
+        const scenarios = document.createElement('span'); scenarios.className = 'market-stake-detail';
+        scenarios.textContent = `If Yes: ${position.yes_payout} · If No: ${position.no_payout} chips`;
+        item.append(top, entries, scenarios);
+      }
+      list.append(item);
     });
     panel.append(list); return panel;
   }

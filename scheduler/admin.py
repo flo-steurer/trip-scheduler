@@ -29,7 +29,7 @@ class ParticipantAdmin(admin.ModelAdmin):
 class MarketTradeInline(admin.TabularInline):
     model = MarketTrade
     extra = 0
-    readonly_fields = ("participant", "outcome", "chips", "created_at")
+    readonly_fields = ("participant", "outcome", "chips", "entry_odds", "created_at")
     can_delete = False
 
 
