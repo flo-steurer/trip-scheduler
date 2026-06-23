@@ -6,7 +6,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.contrib.staticfiles import finders
 
-from .models import Availability, Participant, Trip
+from .models import Availability, Participant, Proposal, ProposalVote, Trip
 from .services import trip_results
 
 
@@ -122,6 +122,86 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(windows[0]["start_date"], "2026-09-05")
         self.assertEqual(windows[0]["available_person_days"], 25)
         self.assertEqual(windows[0]["partial"], [{"name": "Alex", "available_days": 4, "maybe_days": 0}])
+
+    def test_proposals_are_ranked_by_upvotes_and_expose_voters(self):
+        trip = self.make_trip()
+        ari = self.person(trip, "Ari")
+        bea = self.person(trip, "Bea")
+        destination = Proposal.objects.create(trip=trip, submitted_by=ari, type="destination", title="Sicily")
+        stay = Proposal.objects.create(trip=trip, submitted_by=bea, type="stay", title="Villa Mare")
+        ProposalVote.objects.create(proposal=stay, participant=ari)
+        ProposalVote.objects.create(proposal=stay, participant=bea)
+
+        proposals = trip_results(trip)["proposals"]
+        self.assertEqual(proposals[0]["title"], "Villa Mare")
+        self.assertEqual(proposals[0]["voter_names"], ["Ari", "Bea"])
+        self.assertEqual(proposals[1]["title"], "Sicily")
+
+
+class ProposalApiTests(TestCase, TripFactoryMixin):
+    def setUp(self):
+        self.trip = self.make_trip()
+        self.collection_url = reverse("proposal_collection_api", args=[self.trip.public_id])
+
+    def request_json(self, method, url, data):
+        return self.client.generic(method, url, data=json.dumps(data), content_type="application/json")
+
+    def create_proposal(self, **overrides):
+        values = {
+            "name": "Maya",
+            "type": "stay",
+            "title": "Villa Maris",
+            "url": "https://example.com/villa",
+            "note": "Walkable to the beach",
+            "price": "€3,200 / week",
+        }
+        values.update(overrides)
+        return self.request_json("POST", self.collection_url, values)
+
+    def test_create_proposal_returns_results_and_validates_link(self):
+        response = self.create_proposal()
+        self.assertEqual(response.status_code, 200)
+        proposal = Proposal.objects.get()
+        self.assertEqual(proposal.submitted_by.name, "Maya")
+        self.assertEqual(response.json()["results"]["proposals"][0]["title"], "Villa Maris")
+
+        invalid = self.create_proposal(title="Bad link", url="ftp://example.com/villa")
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(Proposal.objects.count(), 1)
+
+    def test_vote_toggles_and_only_allows_one_vote(self):
+        self.create_proposal()
+        proposal = Proposal.objects.get()
+        vote_url = reverse("proposal_vote_api", args=[self.trip.public_id, proposal.id])
+
+        first = self.request_json("POST", vote_url, {"name": "Maya"})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(ProposalVote.objects.count(), 1)
+        self.assertEqual(first.json()["results"]["proposals"][0]["voter_names"], ["Maya"])
+
+        second = self.request_json("POST", vote_url, {"name": "Maya"})
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(ProposalVote.objects.count(), 0)
+
+    def test_edit_and_delete_require_a_name(self):
+        self.create_proposal()
+        proposal = Proposal.objects.get()
+        detail_url = reverse("proposal_detail_api", args=[self.trip.public_id, proposal.id])
+
+        rejected = self.request_json("PATCH", detail_url, {"title": "Changed"})
+        self.assertEqual(rejected.status_code, 400)
+
+        edited = self.request_json("PATCH", detail_url, {
+            "name": "Maya", "type": "destination", "title": "Crete", "url": "", "note": "Warm in September", "price": "",
+        })
+        self.assertEqual(edited.status_code, 200)
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.title, "Crete")
+        self.assertEqual(proposal.type, "destination")
+
+        deleted = self.request_json("DELETE", detail_url, {"name": "Maya"})
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(Proposal.objects.count(), 0)
 
 
 class AvailabilityApiTests(TestCase, TripFactoryMixin):

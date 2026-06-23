@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import timedelta
 
-from .models import Availability
+from .models import Availability, Proposal
 
 
 def date_range(start, end):
@@ -68,6 +68,30 @@ def trip_results(trip):
         item["start_date"],
     ))
 
+    proposals = list(
+        trip.proposals.select_related("submitted_by").prefetch_related("votes__participant")
+    )
+    proposal_results = []
+    for proposal in proposals:
+        voter_names = sorted(vote.participant.name for vote in proposal.votes.all())
+        proposal_results.append({
+            "id": proposal.id,
+            "type": proposal.type,
+            "type_label": Proposal.Type(proposal.type).label,
+            "title": proposal.title,
+            "url": proposal.url,
+            "note": proposal.note,
+            "price": proposal.price,
+            "submitted_by": proposal.submitted_by.name,
+            "voter_names": voter_names,
+            "vote_count": len(voter_names),
+            "created_at": proposal.created_at.isoformat(),
+            "created_at_timestamp": proposal.created_at.timestamp(),
+        })
+    proposal_results.sort(key=lambda item: (-item["vote_count"], -item["created_at_timestamp"]))
+    for proposal in proposal_results:
+        proposal.pop("created_at_timestamp", None)
+
     return {
         "daily": daily,
         "windows": windows,
@@ -76,4 +100,5 @@ def trip_results(trip):
             "name": participant.name,
             "availability": {day.isoformat(): status for day, status in status_by_person[participant.id].items()},
         } for participant in participants],
+        "proposals": proposal_results,
     }

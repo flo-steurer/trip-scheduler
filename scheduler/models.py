@@ -77,3 +77,44 @@ class Availability(models.Model):
         if self.participant_id and not (self.participant.trip.start_date <= self.date <= self.participant.trip.end_date):
             raise ValidationError({"date": "Availability must be inside the trip's candidate date range."})
 
+
+class Proposal(models.Model):
+    class Type(models.TextChoices):
+        DESTINATION = "destination", "Destination"
+        STAY = "stay", "Villa / stay"
+        OTHER = "other", "Other idea"
+
+    trip = models.ForeignKey(Trip, related_name="proposals", on_delete=models.CASCADE)
+    submitted_by = models.ForeignKey(Participant, related_name="proposals", on_delete=models.CASCADE)
+    type = models.CharField(max_length=16, choices=Type.choices)
+    title = models.CharField(max_length=160)
+    url = models.URLField(blank=True, max_length=500)
+    note = models.TextField(blank=True, max_length=1000)
+    price = models.CharField(blank=True, max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def clean(self):
+        if self.submitted_by_id and self.trip_id and self.submitted_by.trip_id != self.trip_id:
+            raise ValidationError({"submitted_by": "The proposer must belong to this trip."})
+
+    def __str__(self):
+        return self.title
+
+
+class ProposalVote(models.Model):
+    proposal = models.ForeignKey(Proposal, related_name="votes", on_delete=models.CASCADE)
+    participant = models.ForeignKey(Participant, related_name="proposal_votes", on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["proposal", "participant"], name="unique_proposal_vote_per_participant"),
+        ]
+
+    def clean(self):
+        if self.proposal_id and self.participant_id and self.proposal.trip_id != self.participant.trip_id:
+            raise ValidationError({"participant": "Votes must come from a participant in the same trip."})

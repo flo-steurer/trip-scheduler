@@ -3,14 +3,16 @@ from datetime import date
 from urllib.parse import urljoin
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.db import IntegrityError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import TripForm
-from .models import Availability, Participant, Trip
+from .models import Availability, Participant, Proposal, ProposalVote, Trip
 from .services import trip_results
 
 
@@ -49,6 +51,36 @@ def _results_response(trip, **extra):
     payload = {"results": trip_results(trip)}
     payload.update(extra)
     return JsonResponse(payload)
+
+
+def _proposal_fields(body, existing=None):
+    values = {
+        "type": existing.type if existing else None,
+        "title": existing.title if existing else "",
+        "url": existing.url if existing else "",
+        "note": existing.note if existing else "",
+        "price": existing.price if existing else "",
+    }
+    for field in values:
+        if field in body:
+            if not isinstance(body[field], str):
+                return None, f"{field.title()} must be text."
+            values[field] = body[field].strip()
+
+    if values["type"] not in Proposal.Type.values:
+        return None, "Choose a valid proposal type."
+    if not values["title"]:
+        return None, "Enter a proposal title."
+    if len(values["title"]) > 160:
+        return None, "Titles must be 160 characters or fewer."
+    if len(values["url"]) > 500 or len(values["note"]) > 1000 or len(values["price"]) > 100:
+        return None, "One of the proposal fields is too long."
+    if values["url"]:
+        try:
+            URLValidator(schemes=["http", "https"])(values["url"])
+        except ValidationError:
+            return None, "Enter a valid http(s) link."
+    return values, None
 
 
 @require_GET
@@ -121,3 +153,61 @@ def availability_api(request, public_id):
 @require_GET
 def results_api(request, public_id):
     return _results_response(_trip(public_id))
+
+
+@require_POST
+def proposal_collection_api(request, public_id):
+    trip = _trip(public_id)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    fields, error = _proposal_fields(body)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    Proposal.objects.create(trip=trip, submitted_by=participant, **fields)
+    return _results_response(trip, participant={"id": participant.id, "name": participant.name})
+
+
+@require_http_methods(["PATCH", "DELETE"])
+def proposal_detail_api(request, public_id, proposal_id):
+    trip = _trip(public_id)
+    proposal = get_object_or_404(Proposal, trip=trip, pk=proposal_id)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    _participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    if request.method == "DELETE":
+        proposal.delete()
+        return _results_response(trip)
+
+    fields, error = _proposal_fields(body, existing=proposal)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    for field, value in fields.items():
+        setattr(proposal, field, value)
+    proposal.full_clean()
+    proposal.save()
+    return _results_response(trip)
+
+
+@require_POST
+def proposal_vote_api(request, public_id, proposal_id):
+    trip = _trip(public_id)
+    proposal = get_object_or_404(Proposal, trip=trip, pk=proposal_id)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    vote = ProposalVote.objects.filter(proposal=proposal, participant=participant).first()
+    if vote:
+        vote.delete()
+    else:
+        ProposalVote.objects.create(proposal=proposal, participant=participant)
+    return _results_response(trip, participant={"id": participant.id, "name": participant.name})

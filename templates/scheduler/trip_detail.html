@@ -8,6 +8,7 @@
      data-participant-url="{% url 'participant_api' trip.public_id %}"
      data-availability-url="{% url 'availability_api' trip.public_id %}"
      data-results-url="{% url 'results_api' trip.public_id %}"
+     data-proposals-url="{% url 'proposal_collection_api' trip.public_id %}"
      data-start-date="{{ trip.start_date|date:'Y-m-d' }}"
      data-end-date="{{ trip.end_date|date:'Y-m-d' }}"
      data-duration="{{ trip.duration_days }}">
@@ -53,6 +54,20 @@
   <section class="card aggregate-card" aria-labelledby="daily-title">
     <div class="section-heading"><div><p class="eyebrow">At a glance</p><h2 id="daily-title">Daily overlap</h2></div><span id="participant-count" class="participant-count"></span></div>
     <div id="daily-summary" class="daily-summary"></div>
+  </section>
+
+  <section class="card proposals-section" aria-labelledby="proposals-title">
+    <div class="section-heading"><div><p class="eyebrow">Trip ideas</p><h2 id="proposals-title">Where should we go?</h2></div><span id="proposal-state" class="save-state" aria-live="polite"></span></div>
+    <p class="help">Add a destination, villa, or any other idea. Everyone can support as many proposals as they like.</p>
+    <form id="proposal-form" class="proposal-form">
+      <label>Type<select id="proposal-type" required><option value="destination">Destination</option><option value="stay">Villa / stay</option><option value="other">Other idea</option></select></label>
+      <label class="proposal-title-field">Title<input id="proposal-title" maxlength="160" required placeholder="e.g. Villa overlooking Lake Garda"></label>
+      <label>Price <span class="optional">optional</span><input id="proposal-price" maxlength="100" placeholder="e.g. €3,200 / week"></label>
+      <label class="proposal-link-field">Link <span class="optional">optional</span><input id="proposal-url" type="url" maxlength="500" placeholder="https://…"></label>
+      <label class="proposal-note-field">Note <span class="optional">optional</span><textarea id="proposal-note" maxlength="1000" rows="2" placeholder="Why this one is worth a look"></textarea></label>
+      <div class="proposal-form-actions"><button id="proposal-submit" class="button" type="submit">Add idea <span>+</span></button><button id="proposal-cancel" class="text-button" type="button" hidden>Cancel</button></div>
+    </form>
+    <div id="proposal-board" class="proposal-board"></div>
   </section>
 
   <section class="people-section" aria-labelledby="people-title">

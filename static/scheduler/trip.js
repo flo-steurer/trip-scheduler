@@ -7,9 +7,14 @@
   const nameInput = document.querySelector('#participant-name');
   const calendar = document.querySelector('#calendar');
   const saveState = document.querySelector('#save-state');
+  const proposalForm = document.querySelector('#proposal-form');
+  const proposalState = document.querySelector('#proposal-state');
+  const proposalSubmit = document.querySelector('#proposal-submit');
+  const proposalCancel = document.querySelector('#proposal-cancel');
   const storageKey = `trip-scheduler:${app.dataset.tripId}:name`;
   let results = initialResults;
   let submitting = false;
+  let editingProposalId = null;
 
   const csrfToken = () => document.querySelector('[name="csrfmiddlewaretoken"]')?.value || '';
   const isoDate = (value) => value.toISOString().slice(0, 10);
@@ -26,9 +31,14 @@
     saveState.classList.toggle('error', error);
   }
 
-  async function request(url, payload) {
+  function setProposalState(message, error = false) {
+    proposalState.textContent = message;
+    proposalState.classList.toggle('error', error);
+  }
+
+  async function request(url, payload, method = 'POST') {
     const response = await fetch(url, {
-      method: 'POST',
+      method,
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
       body: JSON.stringify(payload),
     });
@@ -137,6 +147,7 @@
     });
     document.querySelector('#participant-count').textContent = `${results.participants.length} participant${results.participants.length === 1 ? '' : 's'}`;
     renderPeople();
+    renderProposals();
   }
 
   function renderPeople() {
@@ -155,6 +166,127 @@
       }
       card.append(mini); target.append(card);
     });
+  }
+
+  function proposalUrl(id) {
+    return `${app.dataset.proposalsUrl}${id}/`;
+  }
+
+  function hasUpvoted(proposal) {
+    const name = currentName().toLocaleLowerCase();
+    return Boolean(name) && proposal.voter_names.some((voter) => voter.toLocaleLowerCase() === name);
+  }
+
+  function renderProposals() {
+    const board = document.querySelector('#proposal-board');
+    board.replaceChildren();
+    if (!results.proposals.length) {
+      const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No ideas yet — add the first one.'; board.append(empty); return;
+    }
+    const types = [
+      ['destination', 'Destinations'],
+      ['stay', 'Villas & stays'],
+      ['other', 'Other ideas'],
+    ];
+    types.forEach(([type, label]) => {
+      const proposals = results.proposals.filter((proposal) => proposal.type === type);
+      if (!proposals.length) return;
+      const group = document.createElement('section'); group.className = 'proposal-group';
+      const heading = document.createElement('h3'); heading.textContent = label; group.append(heading);
+      const cards = document.createElement('div'); cards.className = 'proposal-cards';
+      proposals.forEach((proposal) => cards.append(proposalCard(proposal)));
+      group.append(cards); board.append(group);
+    });
+  }
+
+  function proposalCard(proposal) {
+    const card = document.createElement('article'); card.className = 'proposal-card';
+    const top = document.createElement('div'); top.className = 'proposal-card-top';
+    const title = document.createElement('h4'); title.textContent = proposal.title;
+    const count = document.createElement('span'); count.className = 'proposal-vote-count'; count.textContent = `${proposal.vote_count} upvote${proposal.vote_count === 1 ? '' : 's'}`;
+    top.append(title, count); card.append(top);
+    if (proposal.price) { const price = document.createElement('p'); price.className = 'proposal-price'; price.textContent = proposal.price; card.append(price); }
+    if (proposal.note) { const note = document.createElement('p'); note.className = 'proposal-note'; note.textContent = proposal.note; card.append(note); }
+    if (proposal.url) {
+      const link = document.createElement('a'); link.className = 'proposal-link'; link.href = proposal.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = 'Open link ↗'; card.append(link);
+    }
+    const meta = document.createElement('p'); meta.className = 'proposal-meta';
+    const supporters = proposal.voter_names.length ? `Supported by ${proposal.voter_names.join(', ')}` : 'No upvotes yet';
+    meta.textContent = `Added by ${proposal.submitted_by} · ${supporters}`; card.append(meta);
+    const actions = document.createElement('div'); actions.className = 'proposal-actions';
+    const vote = document.createElement('button'); vote.className = `upvote-button${hasUpvoted(proposal) ? ' voted' : ''}`; vote.type = 'button'; vote.textContent = hasUpvoted(proposal) ? 'Remove upvote' : 'Upvote'; vote.addEventListener('click', () => toggleVote(proposal));
+    const edit = document.createElement('button'); edit.className = 'text-button'; edit.type = 'button'; edit.textContent = 'Edit'; edit.addEventListener('click', () => beginEdit(proposal));
+    const remove = document.createElement('button'); remove.className = 'text-button danger'; remove.type = 'button'; remove.textContent = 'Delete'; remove.addEventListener('click', () => deleteProposal(proposal));
+    actions.append(vote, edit, remove); card.append(actions);
+    return card;
+  }
+
+  function proposalPayload() {
+    return {
+      name: currentName(),
+      type: document.querySelector('#proposal-type').value,
+      title: document.querySelector('#proposal-title').value,
+      price: document.querySelector('#proposal-price').value,
+      url: document.querySelector('#proposal-url').value,
+      note: document.querySelector('#proposal-note').value,
+    };
+  }
+
+  function resetProposalForm() {
+    editingProposalId = null;
+    proposalForm.reset();
+    proposalSubmit.innerHTML = 'Add idea <span>+</span>';
+    proposalCancel.hidden = true;
+  }
+
+  function beginEdit(proposal) {
+    document.querySelector('#proposal-type').value = proposal.type;
+    document.querySelector('#proposal-title').value = proposal.title;
+    document.querySelector('#proposal-price').value = proposal.price;
+    document.querySelector('#proposal-url').value = proposal.url;
+    document.querySelector('#proposal-note').value = proposal.note;
+    editingProposalId = proposal.id;
+    proposalSubmit.textContent = 'Save changes';
+    proposalCancel.hidden = false;
+    proposalForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function submitProposal(event) {
+    event.preventDefault();
+    if (!currentName()) { setProposalState('Save your name before adding an idea.', true); nameInput.focus(); return; }
+    if (submitting) return;
+    submitting = true; setProposalState(editingProposalId ? 'Saving…' : 'Adding…');
+    try {
+      const url = editingProposalId ? proposalUrl(editingProposalId) : app.dataset.proposalsUrl;
+      const data = await request(url, proposalPayload(), editingProposalId ? 'PATCH' : 'POST');
+      results = data.results; resetProposalForm(); renderProposals(); setProposalState('Saved');
+    } catch (error) { setProposalState(error.message, true); }
+    finally { submitting = false; }
+  }
+
+  async function toggleVote(proposal) {
+    if (!currentName()) { setProposalState('Save your name before voting.', true); nameInput.focus(); return; }
+    if (submitting) return;
+    submitting = true; setProposalState('Saving…');
+    try {
+      const data = await request(`${proposalUrl(proposal.id)}vote/`, { name: currentName() });
+      results = data.results; renderProposals(); setProposalState('Saved');
+    } catch (error) { setProposalState(error.message, true); }
+    finally { submitting = false; }
+  }
+
+  async function deleteProposal(proposal) {
+    if (!currentName()) { setProposalState('Save your name before deleting an idea.', true); nameInput.focus(); return; }
+    if (!window.confirm(`Delete “${proposal.title}”?`)) return;
+    if (submitting) return;
+    submitting = true; setProposalState('Deleting…');
+    try {
+      const data = await request(proposalUrl(proposal.id), { name: currentName() }, 'DELETE');
+      results = data.results;
+      if (editingProposalId === proposal.id) resetProposalForm();
+      renderProposals(); setProposalState('Deleted');
+    } catch (error) { setProposalState(error.message, true); }
+    finally { submitting = false; }
   }
 
   async function saveName() {
@@ -191,6 +323,8 @@
 
   document.querySelector('#save-name').addEventListener('click', saveName);
   nameInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); saveName(); } });
+  proposalForm.addEventListener('submit', submitProposal);
+  proposalCancel.addEventListener('click', resetProposalForm);
   document.querySelector('#copy-link').addEventListener('click', async (event) => {
     const input = document.querySelector('#share-url');
     try { await navigator.clipboard.writeText(input.value); event.currentTarget.textContent = 'Copied'; }
