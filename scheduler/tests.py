@@ -66,6 +66,7 @@ class TripFormTests(TestCase):
         self.assertIn("aria-expanded", contents)
         self.assertIn("fixtureIsLive", contents)
         self.assertIn("fixture.kickoff_at", contents)
+        self.assertIn("fixture.current_score", contents)
 
     def test_trip_page_uses_absolute_static_asset_urls(self):
         trip = Trip.objects.create(

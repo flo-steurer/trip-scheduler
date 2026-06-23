@@ -82,12 +82,16 @@ class WorldCupSyncTests(TestCase, WorldCupFactoryMixin):
         trip = self.make_trip()
 
         totals = sync_world_cup(FakeClient([
-            fixture_payload(4, "Spain", "Morocco", status="IN_PLAY", kickoff_at=django_timezone.now() - timedelta(minutes=5)),
+            fixture_payload(
+                4, "Spain", "Morocco", status="IN_PLAY", home_goals=1, away_goals=0,
+                kickoff_at=django_timezone.now() - timedelta(minutes=5),
+            ),
         ]), full=True)
 
         self.assertEqual(totals, {"fixtures": 1, "markets": 1, "settled": 0})
         market = trip_results(trip)["markets"][0]
         self.assertEqual(market["world_cup"]["status"], "live")
+        self.assertEqual(market["world_cup"]["current_score"], "1–0")
         self.assertFalse(market["is_tradeable"])
 
     def test_sync_is_idempotent_and_new_trip_receives_known_fixture_markets(self):

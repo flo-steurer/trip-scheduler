@@ -49,12 +49,19 @@
     label.setAttribute('text-anchor', index ? 'end' : 'start'); label.setAttribute('class', 'chip-history-axis-label'); label.textContent = dateLabel(timestamp); svg.append(label);
   });
 
-  const colors = ['#007a52', '#e6633d', '#4169a7', '#9b5b9d', '#bd7a16', '#16818b', '#b25850', '#52734e'];
+  const colors = [
+    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+    '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+    '#bcbd22', '#17becf', '#393b79', '#637939',
+  ];
+  const dashPatterns = ['', '11 4', '3 3', '11 3 2 3'];
   const legend = document.createElement('ul'); legend.className = 'chip-history-legend';
   history.forEach((series, index) => {
     const color = colors[index] || `hsl(${Math.round(index * 137.508) % 360} 55% 38%)`;
+    const dashPattern = dashPatterns[Math.floor(index / colors.length) % dashPatterns.length];
     const path = document.createElementNS(namespace, 'path');
     path.setAttribute('class', 'chip-history-line'); path.setAttribute('stroke', color);
+    if (dashPattern) path.setAttribute('stroke-dasharray', dashPattern);
     path.setAttribute('d', series.points.map((point, pointIndex) => {
       const x = xFor(new Date(point.timestamp).getTime());
       const y = yFor(point.balance_millis);
@@ -64,7 +71,8 @@
     const title = document.createElementNS(namespace, 'title'); title.textContent = `${series.name}: ${formatChips(series.points.at(-1).balance_millis)} Beer Chips`; path.append(title); svg.append(path);
 
     const item = document.createElement('li');
-    const swatch = document.createElement('i'); swatch.style.backgroundColor = color;
+    const swatch = document.createElement('i'); swatch.style.borderTopColor = color;
+    if (dashPattern) swatch.style.borderTopStyle = 'dashed';
     const name = document.createElement('span'); name.textContent = series.name;
     const balance = document.createElement('strong'); balance.textContent = `${formatChips(series.points.at(-1).balance_millis)} chips`;
     item.append(swatch, name, balance); legend.append(item);

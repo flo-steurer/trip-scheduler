@@ -11,7 +11,7 @@ services:
       SQLITE_PATH: "/data/trip-scheduler.sqlite3"
       FOOTBALL_DATA_API_KEY: "${FOOTBALL_DATA_API_KEY:-}"
       WORLD_CUP_SYNC_ENABLED: "${WORLD_CUP_SYNC_ENABLED:-false}"
-      WORLD_CUP_SYNC_INTERVAL_SECONDS: "${WORLD_CUP_SYNC_INTERVAL_SECONDS:-1200}"
+      WORLD_CUP_SYNC_INTERVAL_SECONDS: "${WORLD_CUP_SYNC_INTERVAL_SECONDS:-60}"
     volumes:
       - ./data:/data
     restart: unless-stopped
@@ -29,7 +29,7 @@ services:
       SQLITE_PATH: "/data/trip-scheduler.sqlite3"
       FOOTBALL_DATA_API_KEY: "${FOOTBALL_DATA_API_KEY:-}"
       WORLD_CUP_SYNC_ENABLED: "${WORLD_CUP_SYNC_ENABLED:-false}"
-      WORLD_CUP_SYNC_INTERVAL_SECONDS: "${WORLD_CUP_SYNC_INTERVAL_SECONDS:-1200}"
+      WORLD_CUP_SYNC_INTERVAL_SECONDS: "${WORLD_CUP_SYNC_INTERVAL_SECONDS:-60}"
     volumes:
       - ./data:/data
     depends_on:

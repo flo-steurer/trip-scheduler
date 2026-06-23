@@ -378,6 +378,7 @@ def trip_results(trip):
                 "away_team": fixture.away_team,
                 "kickoff_at": fixture.kickoff_at.isoformat(),
                 "status": fixture.status,
+                "current_score": fixture.current_score,
                 "final_score": fixture.final_score,
             } if fixture else None,
         })

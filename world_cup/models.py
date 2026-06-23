@@ -27,10 +27,14 @@ class WorldCupFixture(models.Model):
         return self.status == self.Status.SCHEDULED and self.kickoff_at > timezone.now()
 
     @property
-    def final_score(self):
+    def current_score(self):
         if self.home_regulation_goals is None or self.away_regulation_goals is None:
             return None
         return f"{self.home_regulation_goals}–{self.away_regulation_goals}"
+
+    @property
+    def final_score(self):
+        return self.current_score if self.status == self.Status.FINAL else None
 
     def __str__(self):
         return f"{self.home_team} vs {self.away_team}"

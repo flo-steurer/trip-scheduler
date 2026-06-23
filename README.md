@@ -31,6 +31,6 @@ Do not expose Gunicorn directly to the public internet. Place it behind a VPN or
 
 ## Optional 2026 World Cup Beermarkets
 
-Set `FOOTBALL_DATA_API_KEY` and `WORLD_CUP_SYNC_ENABLED=true` in `.env`, then restart Compose. The `world-cup-sync` service creates and settles markets for every World Cup fixture. It polls every 20 minutes by default and uses the football-data.org token only in the background container.
+Set `FOOTBALL_DATA_API_KEY` and `WORLD_CUP_SYNC_ENABLED=true` in `.env`, then restart Compose. The `world-cup-sync` service creates and settles markets for every World Cup fixture, and refreshes scores once a minute by default. It uses the football-data.org token only in the background container.
 
 After the tournament, set `WORLD_CUP_SYNC_ENABLED=false`, remove the `world-cup-sync` service and the `world_cup` Django app in a cleanup change. Generated settled markets remain ordinary historical Beermarket records; manual markets are never modified by the integration.

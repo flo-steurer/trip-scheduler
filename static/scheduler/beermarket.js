@@ -117,7 +117,7 @@
     const status = document.createElement('span'); status.className = `market-status${market.is_resolved ? ' resolved' : ''}${fixtureIsLive ? ' live' : ''}`;
     if (market.is_resolved) status.textContent = fixture?.final_score ? `Final: ${fixture.final_score}` : `Resolved: ${market.resolved_outcome === 'yes' ? 'Yes' : 'No'}`;
     else if (market.pricing_model === 'legacy') status.textContent = 'Legacy market';
-    else if (fixture) status.textContent = fixtureIsLive ? 'Live' : fixture.status === 'cancelled' ? 'Cancelled' : 'Upcoming';
+    else if (fixture) status.textContent = fixtureIsLive ? `Live${fixture.current_score ? ` · ${fixture.current_score}` : ''}` : fixture.status === 'cancelled' ? 'Cancelled' : 'Upcoming';
     else status.textContent = 'Live';
     top.append(question, status); card.append(top);
     if (fixture) {
