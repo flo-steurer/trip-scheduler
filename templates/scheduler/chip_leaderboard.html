@@ -34,5 +34,6 @@
   </section>
 </div>
 {{ chip_holdings_history|json_script:"chip-holdings-history" }}
+<script src="{% static 'scheduler/vendor/echarts.common.min.js' %}"></script>
 <script src="{% static 'scheduler/chip_leaderboard.js' %}"></script>
 {% endblock %}

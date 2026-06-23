@@ -45,6 +45,7 @@ class TripFormTests(TestCase):
         self.assertIsNotNone(finders.find("scheduler/trip.js"))
         self.assertIsNotNone(finders.find("scheduler/beermarket.js"))
         self.assertIsNotNone(finders.find("scheduler/chip_leaderboard.js"))
+        self.assertIsNotNone(finders.find("scheduler/vendor/echarts.common.min.js"))
         self.assertIsNotNone(finders.find("scheduler/favicon.svg"))
 
     def test_calendar_uses_millisecond_chip_balances(self):
@@ -404,6 +405,7 @@ class LeaderboardPageTests(TestCase, TripFactoryMixin):
         self.assertContains(response, "Beer Chips")
         self.assertContains(response, "7.5 chips")
         self.assertContains(response, 'id="chip-history-chart"')
+        self.assertContains(response, 'src="/static/scheduler/vendor/echarts.common.min.js"')
         self.assertContains(response, 'src="/static/scheduler/chip_leaderboard.js"')
         self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
 
