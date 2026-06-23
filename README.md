@@ -26,3 +26,9 @@ This is intentionally access-free: anyone who has a trip URL can see the groupâ€
 If an outside user gets a 404 before any request appears in `docker compose logs`, their VPN/reverse-proxy route is not reaching this container. Confirm that `http://<server-vpn-address>:8000/` is reachable first; if a reverse proxy is in front, forward its site to `http://127.0.0.1:8000` and use that public origin as `PUBLIC_BASE_URL`.
 
 Do not expose Gunicorn directly to the public internet. Place it behind a VPN or a reverse proxy (such as Caddy or Nginx) with HTTPS and request time limits. The container uses threaded Gunicorn workers so one slow/incomplete client connection does not block every availability update, but a reverse proxy remains the proper network boundary.
+
+## Optional 2026 World Cup Beermarkets
+
+Set `FOOTBALL_DATA_API_KEY` and `WORLD_CUP_SYNC_ENABLED=true` in `.env`, then restart Compose. The `world-cup-sync` service creates and settles markets only for World Cup fixtures involving Austria, Germany, or Cape Verde. It polls every 20 minutes by default and uses the football-data.org token only in the background container.
+
+After the tournament, set `WORLD_CUP_SYNC_ENABLED=false`, remove the `world-cup-sync` service and the `world_cup` Django app in a cleanup change. Generated settled markets remain ordinary historical Beermarket records; manual markets are never modified by the integration.

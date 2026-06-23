@@ -54,10 +54,17 @@ class MarketAdmin(admin.ModelAdmin):
     def _resolve(self, request, queryset, outcome):
         awarded = 0
         resolved = 0
+        skipped_automatic = 0
         for market in queryset.filter(resolved_outcome=""):
+            if hasattr(market, "world_cup_market"):
+                skipped_automatic += 1
+                continue
             try:
                 awarded += market.resolve(outcome)
                 resolved += 1
             except ValidationError:
                 continue
-        self.message_user(request, f"Resolved {resolved} market(s); awarded Beer Karma to {awarded} winning trader(s).")
+        message = f"Resolved {resolved} market(s); awarded Beer Karma to {awarded} winning trader(s)."
+        if skipped_automatic:
+            message += f" Skipped {skipped_automatic} automatic World Cup market(s)."
+        self.message_user(request, message)

@@ -177,9 +177,11 @@ def trip_results(trip):
     for proposal in proposal_results:
         proposal.pop("created_at_timestamp", None)
 
-    markets = list(trip.markets.prefetch_related("trades__participant"))
+    markets = list(trip.markets.prefetch_related("trades__participant").select_related("world_cup_market__fixture"))
     market_results = []
     for market in markets:
+        world_cup_market = getattr(market, "world_cup_market", None)
+        fixture = world_cup_market.fixture if world_cup_market else None
         trades = list(market.trades.all())
         yes_chips = market.seed_chips
         no_chips = market.seed_chips
@@ -206,6 +208,7 @@ def trip_results(trip):
             "id": market.id,
             "question": market.question,
             "is_resolved": market.is_resolved,
+            "is_tradeable": not market.is_resolved and (not fixture or fixture.is_tradeable),
             "resolved_outcome": market.resolved_outcome,
             "yes_odds": round(yes_chips / (yes_chips + no_chips) * 100),
             "no_odds": round(no_chips / (yes_chips + no_chips) * 100),
@@ -221,6 +224,13 @@ def trip_results(trip):
                 positions.items(),
                 key=lambda item: (-(item[1]["yes_shares"] + item[1]["no_shares"]), item[1]["name"].casefold()),
             )],
+            "world_cup": {
+                "home_team": fixture.home_team,
+                "away_team": fixture.away_team,
+                "kickoff_at": fixture.kickoff_at.isoformat(),
+                "status": fixture.status,
+                "final_score": fixture.final_score,
+            } if fixture else None,
         })
 
     return {

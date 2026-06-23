@@ -17,6 +17,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "scheduler",
+    "world_cup",
 ]
 
 MIDDLEWARE = [
@@ -47,8 +48,13 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": os.environ.get("SQLITE_PATH", BASE_DIR / "db.sqlite3"),
+        "OPTIONS": {"timeout": 20},
     }
 }
+
+FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY", "")
+WORLD_CUP_SYNC_ENABLED = os.environ.get("WORLD_CUP_SYNC_ENABLED", "false").lower() == "true"
+WORLD_CUP_SYNC_INTERVAL_SECONDS = int(os.environ.get("WORLD_CUP_SYNC_INTERVAL_SECONDS", "1200"))
 
 AUTH_PASSWORD_VALIDATORS = []
 LANGUAGE_CODE = "en-us"

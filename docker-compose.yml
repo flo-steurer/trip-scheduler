@@ -9,6 +9,29 @@ services:
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}"
       PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-}"
       SQLITE_PATH: "/data/trip-scheduler.sqlite3"
+      FOOTBALL_DATA_API_KEY: "${FOOTBALL_DATA_API_KEY:-}"
+      WORLD_CUP_SYNC_ENABLED: "${WORLD_CUP_SYNC_ENABLED:-false}"
+      WORLD_CUP_SYNC_INTERVAL_SECONDS: "${WORLD_CUP_SYNC_INTERVAL_SECONDS:-1200}"
     volumes:
       - ./data:/data
+    restart: unless-stopped
+
+  world-cup-sync:
+    build: .
+    command: >
+      sh -c 'if [ "$${WORLD_CUP_SYNC_ENABLED}" = "true" ] && [ -n "$${FOOTBALL_DATA_API_KEY}" ];
+      then exec python manage.py sync_world_cup_markets --watch;
+      else echo "World Cup sync disabled"; exec sleep infinity; fi'
+    environment:
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-replace-this-before-sharing}"
+      DJANGO_DEBUG: "${DJANGO_DEBUG:-false}"
+      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}"
+      SQLITE_PATH: "/data/trip-scheduler.sqlite3"
+      FOOTBALL_DATA_API_KEY: "${FOOTBALL_DATA_API_KEY:-}"
+      WORLD_CUP_SYNC_ENABLED: "${WORLD_CUP_SYNC_ENABLED:-false}"
+      WORLD_CUP_SYNC_INTERVAL_SECONDS: "${WORLD_CUP_SYNC_INTERVAL_SECONDS:-1200}"
+    volumes:
+      - ./data:/data
+    depends_on:
+      - trip-scheduler
     restart: unless-stopped

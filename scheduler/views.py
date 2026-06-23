@@ -15,6 +15,8 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from .forms import TripForm
 from .models import Availability, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
 from .services import idea_leaderboard, trip_results
+from world_cup.models import WorldCupMarket
+from world_cup.services import materialize_world_cup_markets_for_trip
 
 
 activity_logger = logging.getLogger("scheduler.activity")
@@ -129,6 +131,7 @@ def create_trip(request):
     form = TripForm(request.POST)
     if form.is_valid():
         trip = form.save()
+        materialize_world_cup_markets_for_trip(trip)
         return redirect("trip_detail", public_id=trip.public_id)
     return render(request, "scheduler/home.html", {"form": form}, status=400)
 
@@ -348,6 +351,9 @@ def market_trade_api(request, public_id, market_id):
         participant = Participant.objects.select_for_update().get(pk=participant.pk)
         if market.is_resolved:
             return JsonResponse({"error": "This Beermarket has already been resolved."}, status=400)
+        world_cup_market = WorldCupMarket.objects.select_related("fixture").filter(market=market).first()
+        if world_cup_market and not world_cup_market.fixture.is_tradeable:
+            return JsonResponse({"error": "This World Cup market is no longer accepting trades."}, status=400)
         if chips > participant.beer_chips:
             return JsonResponse({"error": "You do not have that many Beer Chips."}, status=400)
         participant.beer_chips -= chips

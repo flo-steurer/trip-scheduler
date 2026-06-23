@@ -87,8 +87,18 @@
     const card = document.createElement('article'); card.className = `market-card${market.is_resolved ? ' resolved' : ''}`;
     const top = document.createElement('div'); top.className = 'market-card-top';
     const question = document.createElement('h3'); question.textContent = market.question;
-    const status = document.createElement('span'); status.className = `market-status${market.is_resolved ? ' resolved' : ''}`; status.textContent = market.is_resolved ? `Resolved: ${market.resolved_outcome === 'yes' ? 'Yes' : 'No'}` : 'Live';
+    const fixture = market.world_cup;
+    const status = document.createElement('span'); status.className = `market-status${market.is_resolved ? ' resolved' : ''}`;
+    if (market.is_resolved) status.textContent = fixture?.final_score ? `Final: ${fixture.final_score}` : `Resolved: ${market.resolved_outcome === 'yes' ? 'Yes' : 'No'}`;
+    else if (fixture) status.textContent = fixture.status === 'live' ? 'World Cup · Live' : fixture.status === 'cancelled' ? 'World Cup · Closed' : 'World Cup';
+    else status.textContent = 'Live';
     top.append(question, status); card.append(top);
+    if (fixture) {
+      const details = document.createElement('p'); details.className = 'market-fixture-details';
+      const kickoff = new Date(fixture.kickoff_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+      details.textContent = `${fixture.home_team} vs ${fixture.away_team} · ${kickoff}`;
+      card.append(details);
+    }
     const prices = document.createElement('div'); prices.className = 'market-prices';
     [['Yes', market.yes_odds, 'yes'], ['No', market.no_odds, 'no']].forEach(([label, odds, kind]) => { const price = document.createElement('span'); price.className = `market-price ${kind}`; price.innerHTML = `<small>${label}</small>${odds}¢`; prices.append(price); });
     const analysis = document.createElement('div'); analysis.className = 'market-analysis';
@@ -100,7 +110,7 @@
     analysis.append(chart, stakePanel(market));
     card.append(prices, analysis);
     const pool = document.createElement('p'); pool.className = 'market-pool'; pool.textContent = `${market.total_chips} Beer Chip${market.total_chips === 1 ? '' : 's'} in the pool`; card.append(pool);
-    if (!market.is_resolved) {
+    if (market.is_tradeable) {
       const trade = document.createElement('div'); trade.className = 'market-trade';
       const amount = document.createElement('input'); amount.type = 'number'; amount.min = '1'; amount.max = String(ownParticipant()?.beer_chips ?? 10); amount.value = '1'; amount.setAttribute('aria-label', 'Beer Chips to spend');
       const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'market-buy yes'; yes.textContent = 'Buy Yes'; yes.addEventListener('click', () => buyShares(market, 'yes', amount.value));
