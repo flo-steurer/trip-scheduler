@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}{{ trip.title }} · Trip Scheduler{% endblock %}
+{% block header_action %}<a class="text-link" href="{% url 'home' %}">Create another trip</a>{% endblock %}
+{% block content %}
+<div class="shell trip-shell" id="trip-app"
+     data-trip-id="{{ trip.public_id }}"
+     data-participant-url="{% url 'participant_api' trip.public_id %}"
+     data-availability-url="{% url 'availability_api' trip.public_id %}"
+     data-results-url="{% url 'results_api' trip.public_id %}"
+     data-start-date="{{ trip.start_date|date:'Y-m-d' }}"
+     data-end-date="{{ trip.end_date|date:'Y-m-d' }}"
+     data-duration="{{ trip.duration_days }}">
+  <section class="trip-heading">
+    <div>
+      <p class="eyebrow">Shared trip calendar</p>
+      <h1>{{ trip.title }}</h1>
+      <p class="trip-meta">{% if trip.destination %}{{ trip.destination }} · {% endif %}{{ trip.start_date|date:"M j" }} – {{ trip.end_date|date:"M j, Y" }} <span>·</span> {{ trip.duration_days }} day{{ trip.duration_days|pluralize }}</p>
+    </div>
+    <div class="share-box">
+      <span>Share this link</span>
+      <div><input id="share-url" value="{{ request.build_absolute_uri }}" readonly aria-label="Trip sharing URL"><button id="copy-link" class="copy-button" type="button">Copy</button></div>
+    </div>
+  </section>
+
+  <div class="trip-layout">
+    <section class="card response-card" aria-labelledby="availability-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Your response</p><h2 id="availability-title">Mark your calendar</h2></div>
+        <span id="save-state" class="save-state" aria-live="polite"></span>
+      </div>
+      <div class="name-row">
+        <label for="participant-name">Your name</label>
+        <input id="participant-name" maxlength="80" autocomplete="name" placeholder="e.g. Sam">
+        <button id="save-name" class="button small" type="button">Save</button>
+      </div>
+      <p class="help" id="name-help">Choose a name, then tap dates to cycle through the options.</p>
+      <div class="legend" aria-label="Availability statuses">
+        <span><i class="dot available"></i>Available</span><span><i class="dot maybe"></i>Maybe</span><span><i class="dot unavailable"></i>Unavailable</span><span><i class="dot unmarked"></i>Unmarked</span>
+      </div>
+      <div id="calendar" class="calendars" aria-live="polite"></div>
+    </section>
+
+    <aside class="card results-card" aria-labelledby="best-dates-title">
+      <p class="eyebrow">Group overlap</p>
+      <h2 id="best-dates-title">Best dates</h2>
+      <p class="help">Ranked by people available for every day, then people who might make it.</p>
+      <div id="best-windows" class="best-windows"></div>
+    </aside>
+  </div>
+
+  <section class="card aggregate-card" aria-labelledby="daily-title">
+    <div class="section-heading"><div><p class="eyebrow">At a glance</p><h2 id="daily-title">Daily overlap</h2></div><span id="participant-count" class="participant-count"></span></div>
+    <div id="daily-summary" class="daily-summary"></div>
+  </section>
+
+  <section class="people-section" aria-labelledby="people-title">
+    <div class="section-heading"><div><p class="eyebrow">The group</p><h2 id="people-title">Everyone’s calendars</h2></div></div>
+    <div id="people-calendars" class="people-calendars"></div>
+  </section>
+</div>
+{{ initial_results|json_script:"initial-results" }}
+<script src="{% static 'scheduler/trip.js' %}"></script>
+{% endblock %}

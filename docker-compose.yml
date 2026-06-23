@@ -1,0 +1,14 @@
+services:
+  trip-scheduler:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-replace-this-before-sharing}"
+      DJANGO_DEBUG: "${DJANGO_DEBUG:-false}"
+      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}"
+      SQLITE_PATH: "/data/trip-scheduler.sqlite3"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+

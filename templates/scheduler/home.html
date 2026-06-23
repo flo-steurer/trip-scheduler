@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}Create a trip · Trip Scheduler{% endblock %}
+{% block content %}
+<section class="hero shell">
+  <div class="hero-copy">
+    <p class="eyebrow">Group trip planning, minus the thread</p>
+    <h1>Find dates your crew can actually make.</h1>
+    <p class="lead">Create a calendar, send one link, and see the best trip windows emerge as everyone adds their availability.</p>
+    <div class="legend intro-legend" aria-label="Availability statuses">
+      <span><i class="dot available"></i>Available</span>
+      <span><i class="dot maybe"></i>Maybe</span>
+      <span><i class="dot unavailable"></i>Unavailable</span>
+    </div>
+  </div>
+  <section class="card create-card" aria-labelledby="create-title">
+    <p class="eyebrow">Start here</p>
+    <h2 id="create-title">Create a trip calendar</h2>
+    <form method="post" action="{% url 'create_trip' %}" class="form-grid">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error">{{ form.non_field_errors }}</div>{% endif %}
+      <label class="wide">Trip name {{ form.title }}{% for error in form.title.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+      <label class="wide">Destination <span class="optional">optional</span>{{ form.destination }}{% for error in form.destination.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+      <label>Dates from {{ form.start_date }}{% for error in form.start_date.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+      <label>to {{ form.end_date }}{% for error in form.end_date.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+      <label class="wide">Preferred trip length (days) {{ form.duration_days }}{% for error in form.duration_days.errors %}<small class="field-error">{{ error }}</small>{% endfor %}</label>
+      <button class="button wide" type="submit">Create and get a link <span>→</span></button>
+    </form>
+  </section>
+</section>
+{% endblock %}
