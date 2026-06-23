@@ -52,6 +52,14 @@ class TripFormTests(TestCase):
         self.assertIn("person.beer_chip_millis", contents)
         self.assertNotIn("person.beer_chips", contents)
 
+    def test_beermarket_groups_world_cup_markets_separately(self):
+        with open(finders.find("scheduler/beermarket.js"), encoding="utf-8") as script:
+            contents = script.read()
+
+        self.assertIn("renderWorldCupMarkets", contents)
+        self.assertIn("renderOtherMarkets", contents)
+        self.assertIn("Show ${settled.length} settled match", contents)
+
     def test_trip_page_uses_absolute_static_asset_urls(self):
         trip = Trip.objects.create(
             title="Island escape",

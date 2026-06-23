@@ -4,6 +4,7 @@
 
   let results = JSON.parse(document.querySelector('#initial-market-results').textContent);
   let submitting = false;
+  let showSettledWorldCup = false;
   const nameInput = document.querySelector('#market-name');
   const state = document.querySelector('#market-state');
   const balance = document.querySelector('#market-balance');
@@ -111,13 +112,13 @@
     const status = document.createElement('span'); status.className = `market-status${market.is_resolved ? ' resolved' : ''}`;
     if (market.is_resolved) status.textContent = fixture?.final_score ? `Final: ${fixture.final_score}` : `Resolved: ${market.resolved_outcome === 'yes' ? 'Yes' : 'No'}`;
     else if (market.pricing_model === 'legacy') status.textContent = 'Legacy market';
-    else if (fixture) status.textContent = fixture.status === 'live' ? 'World Cup · Live' : fixture.status === 'cancelled' ? 'World Cup · Closed' : 'World Cup';
+    else if (fixture) status.textContent = fixture.status === 'live' ? 'Live' : fixture.status === 'cancelled' ? 'Cancelled' : 'Upcoming';
     else status.textContent = 'Live';
     top.append(question, status); card.append(top);
     if (fixture) {
       const details = document.createElement('p'); details.className = 'market-fixture-details';
-      const kickoff = new Date(fixture.kickoff_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-      details.textContent = `${fixture.home_team} vs ${fixture.away_team} · ${kickoff}`;
+      const kickoff = new Date(fixture.kickoff_at).toLocaleTimeString([], { timeStyle: 'short' });
+      details.textContent = `${fixture.home_team} vs ${fixture.away_team} · Kickoff ${kickoff}`;
       card.append(details);
     }
     const prices = document.createElement('div'); prices.className = 'market-prices';
@@ -144,15 +145,83 @@
     return card;
   }
 
+  function worldCupSort(left, right) {
+    const leftLive = left.world_cup.status === 'live';
+    const rightLive = right.world_cup.status === 'live';
+    if (leftLive !== rightLive) return leftLive ? -1 : 1;
+    return new Date(left.world_cup.kickoff_at) - new Date(right.world_cup.kickoff_at) || left.id - right.id;
+  }
+
+  function fixtureDateKey(market) {
+    const date = new Date(market.world_cup.kickoff_at);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+
+  function fixtureDateLabel(market) {
+    return new Date(market.world_cup.kickoff_at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  function section(title) {
+    const element = document.createElement('section'); element.className = 'market-section';
+    const heading = document.createElement('h2'); heading.textContent = title;
+    element.append(heading);
+    return element;
+  }
+
+  function appendFixtureDateGroups(target, markets) {
+    const groups = new Map();
+    markets.slice().sort(worldCupSort).forEach((market) => {
+      const key = fixtureDateKey(market);
+      const group = groups.get(key) || [];
+      group.push(market); groups.set(key, group);
+    });
+    groups.forEach((marketsForDate) => {
+      const group = document.createElement('div'); group.className = 'fixture-date-group';
+      const heading = document.createElement('h3'); heading.className = 'fixture-date-title'; heading.textContent = fixtureDateLabel(marketsForDate[0]);
+      group.append(heading);
+      marketsForDate.forEach((market) => group.append(marketCard(market)));
+      target.append(group);
+    });
+  }
+
+  function renderWorldCupMarkets(board, markets) {
+    const worldCup = section('World Cup');
+    const active = markets.filter((market) => !market.is_resolved);
+    const settled = markets.filter((market) => market.is_resolved);
+    if (active.length) appendFixtureDateGroups(worldCup, active);
+    if (settled.length) {
+      const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'text-button market-section-toggle';
+      toggle.textContent = showSettledWorldCup ? 'Hide settled matches' : `Show ${settled.length} settled match${settled.length === 1 ? '' : 'es'}`;
+      toggle.setAttribute('aria-expanded', String(showSettledWorldCup));
+      toggle.addEventListener('click', () => { showSettledWorldCup = !showSettledWorldCup; renderMarkets(); });
+      worldCup.append(toggle);
+      if (showSettledWorldCup) appendFixtureDateGroups(worldCup, settled);
+    }
+    if (!active.length && !showSettledWorldCup) {
+      const empty = document.createElement('p'); empty.className = 'market-section-empty'; empty.textContent = settled.length ? 'All World Cup matches are settled.' : 'World Cup fixtures will appear after the next sync.';
+      worldCup.append(empty);
+    }
+    board.append(worldCup);
+  }
+
+  function renderOtherMarkets(board, markets) {
+    const other = section('Other markets');
+    const live = markets.filter((market) => !market.is_resolved);
+    const resolved = markets.filter((market) => market.is_resolved);
+    if (live.length) { const heading = document.createElement('h3'); heading.className = 'market-group-title'; heading.textContent = 'Live'; other.append(heading); live.forEach((market) => other.append(marketCard(market))); }
+    if (resolved.length) { const heading = document.createElement('h3'); heading.className = 'market-group-title'; heading.textContent = 'Resolved'; other.append(heading); resolved.forEach((market) => other.append(marketCard(market))); }
+    board.append(other);
+  }
+
   function renderMarkets() {
     const board = document.querySelector('#market-board'); board.replaceChildren();
     if (!results.markets.length) {
       const empty = document.createElement('p'); empty.className = 'empty market-empty'; empty.textContent = 'No markets yet. The organizer can create one in Django admin.'; board.append(empty); return;
     }
-    const live = results.markets.filter((market) => !market.is_resolved);
-    const resolved = results.markets.filter((market) => market.is_resolved);
-    if (live.length) { const heading = document.createElement('h3'); heading.className = 'market-group-title'; heading.textContent = 'Live'; board.append(heading); live.forEach((market) => board.append(marketCard(market))); }
-    if (resolved.length) { const heading = document.createElement('h3'); heading.className = 'market-group-title'; heading.textContent = 'Resolved'; board.append(heading); resolved.forEach((market) => board.append(marketCard(market))); }
+    const worldCupMarkets = results.markets.filter((market) => market.world_cup);
+    const otherMarkets = results.markets.filter((market) => !market.world_cup);
+    if (worldCupMarkets.length) renderWorldCupMarkets(board, worldCupMarkets);
+    if (otherMarkets.length) renderOtherMarkets(board, otherMarkets);
   }
 
   function render() { renderAccount(); renderMarkets(); }
