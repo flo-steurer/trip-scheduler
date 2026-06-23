@@ -220,6 +220,24 @@ class ResultsTests(TestCase, TripFactoryMixin):
             "name": "Bea", "available_days": 1, "maybe_days": 0, "minimum_days": 2,
         }])
 
+    def test_people_with_no_available_or_maybe_dates_are_excluded_from_scoring(self):
+        trip = self.make_trip(end_date=date(2026, 7, 2), duration_days=2)
+        self.person(trip, "Ari", {
+            date(2026, 7, 1): "available",
+            date(2026, 7, 2): "available",
+        })
+        self.person(trip, "Bea", {
+            date(2026, 7, 1): "unavailable",
+            date(2026, 7, 2): "unavailable",
+        })
+        self.person(trip, "Cy")
+
+        window = trip_results(trip)["windows"][0]
+
+        self.assertEqual(window["eligible_attendees"], ["Ari"])
+        self.assertEqual(window["attendance_rate"], 100)
+        self.assertEqual(window["below_minimum"], [])
+
     def test_proposals_are_ranked_by_upvotes_and_expose_voters(self):
         trip = self.make_trip()
         ari = self.person(trip, "Ari")

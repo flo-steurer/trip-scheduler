@@ -60,6 +60,15 @@ def trip_results(trip):
         participant.id: {availability.date: availability.status for availability in participant.availabilities.all()}
         for participant in participants
     }
+    scoring_participants = [
+        participant
+        for participant in participants
+        if any(
+            status_by_person[participant.id].get(day)
+            in (Availability.Status.AVAILABLE, Availability.Status.MAYBE)
+            for day in days
+        )
+    ]
 
     daily = []
     for day in days:
@@ -76,7 +85,7 @@ def trip_results(trip):
             available_person_days = 0
             maybe_person_days = 0
             daily_confirmed_attendance = [0] * duration_days
-            for participant in participants:
+            for participant in scoring_participants:
                 statuses = [status_by_person[participant.id].get(day, "unmarked") for day in window_days]
                 available_days = statuses.count(Availability.Status.AVAILABLE)
                 maybe_days = statuses.count(Availability.Status.MAYBE)
@@ -107,7 +116,7 @@ def trip_results(trip):
                         "maybe_days": maybe_days,
                     })
             attendance_score = available_person_days * 2 + maybe_person_days
-            possible_score = len(participants) * duration_days * 2
+            possible_score = len(scoring_participants) * duration_days * 2
             attendance_rate_value = attendance_score / possible_score if possible_score else 0
             attendance_rate = round(attendance_rate_value * 100)
             maximum_villa_capacity = max(daily_confirmed_attendance, default=0)
