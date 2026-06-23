@@ -2,10 +2,9 @@ from collections import defaultdict
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from django.db.models import F
 from django.utils import timezone
 
-from scheduler.models import Market, Participant
+from scheduler.models import ChipBalanceEvent, Market, Participant
 
 
 class Command(BaseCommand):
@@ -40,8 +39,14 @@ class Command(BaseCommand):
         with transaction.atomic():
             now = timezone.now()
             for participant_id, refund_millis in refunds.items():
-                Participant.objects.filter(pk=participant_id).update(
-                    beer_chip_millis=F("beer_chip_millis") + refund_millis,
+                participant = Participant.objects.select_for_update().get(pk=participant_id)
+                participant.beer_chip_millis += refund_millis
+                participant.save(update_fields=["beer_chip_millis"])
+                ChipBalanceEvent.objects.create(
+                    participant=participant,
+                    amount_millis=refund_millis,
+                    balance_after_millis=participant.beer_chip_millis,
+                    reason=ChipBalanceEvent.Reason.LEGACY_REFUND,
                 )
             for market in markets:
                 replacement = Market.objects.create(

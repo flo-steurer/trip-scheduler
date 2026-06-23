@@ -278,7 +278,8 @@
       const maybe = document.createElement('span'); maybe.className = 'daily-maybe'; maybe.textContent = day.maybe ? `${day.maybe} maybe` : '—';
       cell.append(date, total, maybe); daily.append(cell);
     });
-    document.querySelector('#participant-count').textContent = `${results.participants.length} participant${results.participants.length === 1 ? '' : 's'}`;
+    const activeCount = results.active_participant_count;
+    document.querySelector('#participant-count').textContent = `${activeCount} active participant${activeCount === 1 ? '' : 's'}`;
     renderMinimumAttendance();
     renderPeople();
     renderProposals();
@@ -286,11 +287,12 @@
 
   function renderPeople() {
     const target = document.querySelector('#people-calendars'); target.replaceChildren();
-    if (!results.participants.length) {
-      const empty = document.createElement('p'); empty.className = 'empty people-empty'; empty.textContent = 'Participant calendars will appear here.'; target.append(empty); return;
+    const activeParticipants = results.participants.filter((person) => person.is_active);
+    if (!activeParticipants.length) {
+      const empty = document.createElement('p'); empty.className = 'empty people-empty'; empty.textContent = 'Active participant calendars will appear once someone marks a date.'; target.append(empty); return;
     }
     const start = localDate(app.dataset.startDate); const end = localDate(app.dataset.endDate);
-    results.participants.forEach((person) => {
+    activeParticipants.forEach((person) => {
       const card = document.createElement('article'); card.className = 'person-card';
       const heading = document.createElement('div'); heading.className = 'person-card-heading';
       const name = document.createElement('h3'); name.textContent = person.name;

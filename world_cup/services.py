@@ -66,7 +66,7 @@ def _market_for_trip(fixture, trip):
 
 
 def materialize_fixture_markets(fixture, trips=None):
-    if not fixture.is_tradeable:
+    if fixture.status not in {WorldCupFixture.Status.SCHEDULED, WorldCupFixture.Status.LIVE}:
         return 0
     created = 0
     for trip in trips if trips is not None else Trip.objects.all():

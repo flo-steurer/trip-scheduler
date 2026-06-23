@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 class WorldCupFixture(models.Model):
@@ -23,7 +24,7 @@ class WorldCupFixture(models.Model):
 
     @property
     def is_tradeable(self):
-        return self.status in {self.Status.SCHEDULED, self.Status.LIVE}
+        return self.status == self.Status.SCHEDULED and self.kickoff_at > timezone.now()
 
     @property
     def final_score(self):

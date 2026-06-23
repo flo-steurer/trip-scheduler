@@ -7,6 +7,7 @@ urlpatterns = [
     path("trips/new/", views.create_trip, name="create_trip"),
     path("trips/<uuid:public_id>/", views.trip_detail, name="trip_detail"),
     path("trips/<uuid:public_id>/leaderboard/", views.leaderboard, name="leaderboard"),
+    path("trips/<uuid:public_id>/chip-leaderboard/", views.chip_leaderboard_view, name="chip_leaderboard"),
     path("trips/<uuid:public_id>/beermarket/", views.beermarket, name="beermarket"),
     path("trips/<uuid:public_id>/api/participant/", views.participant_api, name="participant_api"),
     path("trips/<uuid:public_id>/api/availability/", views.availability_api, name="availability_api"),

@@ -73,9 +73,17 @@ class Participant(models.Model):
         ordering = ["name"]
 
     def save(self, *args, **kwargs):
+        is_new = self._state.adding
         self.name = self.name.strip()
         self.normalized_name = self.name.casefold()
         super().save(*args, **kwargs)
+        if is_new:
+            ChipBalanceEvent.objects.create(
+                participant=self,
+                amount_millis=self.beer_chip_millis,
+                balance_after_millis=self.beer_chip_millis,
+                reason=ChipBalanceEvent.Reason.OPENING_BALANCE,
+            )
 
     def clean(self):
         if self.minimum_attendance_days > self.trip.maximum_duration_days:
@@ -95,6 +103,27 @@ class DailyBeercoinGrant(models.Model):
 
     def __str__(self):
         return f"{self.amount_millis / 1000:g} Beer Chips on {self.grant_date}"
+
+
+class ChipBalanceEvent(models.Model):
+    class Reason(models.TextChoices):
+        OPENING_BALANCE = "opening_balance", "Opening balance"
+        DAILY_GRANT = "daily_grant", "Daily grant"
+        MARKET_TRADE = "market_trade", "Market trade"
+        MARKET_PAYOUT = "market_payout", "Market payout"
+        LEGACY_REFUND = "legacy_refund", "Legacy market refund"
+
+    participant = models.ForeignKey(Participant, related_name="chip_balance_events", on_delete=models.CASCADE)
+    amount_millis = models.IntegerField()
+    balance_after_millis = models.PositiveIntegerField()
+    reason = models.CharField(max_length=24, choices=Reason.choices)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.participant}: {self.amount_millis / 1000:g} chips"
 
 
 class Availability(models.Model):
@@ -267,21 +296,30 @@ class Market(models.Model):
                 for trade in trades:
                     if trade.outcome == outcome:
                         payouts[trade.participant_id] += trade.shares_millis if trade.shares_millis is not None else trade.chips * self.SHARE_SCALE
-                update_fields = {
-                    "beer_chip_millis": models.F("beer_chip_millis"),
-                    "beer_karma_bonus": models.F("beer_karma_bonus") + 1,
-                }
                 for participant_id, payout in payouts.items():
-                    Participant.objects.filter(pk=participant_id).update(
-                        beer_chip_millis=update_fields["beer_chip_millis"] + payout,
-                        beer_karma_bonus=update_fields["beer_karma_bonus"],
+                    participant = Participant.objects.select_for_update().get(pk=participant_id)
+                    participant.beer_chip_millis += payout
+                    participant.beer_karma_bonus += 1
+                    participant.save(update_fields=["beer_chip_millis", "beer_karma_bonus"])
+                    ChipBalanceEvent.objects.create(
+                        participant=participant,
+                        amount_millis=payout,
+                        balance_after_millis=participant.beer_chip_millis,
+                        reason=ChipBalanceEvent.Reason.MARKET_PAYOUT,
                     )
             else:
                 payouts = self.payout_distribution(trades, outcome)
                 for participant_id, payout in payouts.items():
-                    Participant.objects.filter(pk=participant_id).update(
-                        beer_chip_millis=models.F("beer_chip_millis") + payout * self.SHARE_SCALE,
-                        beer_karma_bonus=models.F("beer_karma_bonus") + 1,
+                    participant = Participant.objects.select_for_update().get(pk=participant_id)
+                    payout_millis = payout * self.SHARE_SCALE
+                    participant.beer_chip_millis += payout_millis
+                    participant.beer_karma_bonus += 1
+                    participant.save(update_fields=["beer_chip_millis", "beer_karma_bonus"])
+                    ChipBalanceEvent.objects.create(
+                        participant=participant,
+                        amount_millis=payout_millis,
+                        balance_after_millis=participant.beer_chip_millis,
+                        reason=ChipBalanceEvent.Reason.MARKET_PAYOUT,
                     )
             market.resolved_outcome = outcome
             market.resolved_at = timezone.now()

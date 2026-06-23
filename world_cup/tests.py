@@ -1,8 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone as django_timezone
 from unittest.mock import patch
 
 from scheduler.models import Market, MarketTrade, Participant, Trip
@@ -15,10 +16,10 @@ from world_cup.services import (
 )
 
 
-def fixture_payload(fixture_id, home, away, *, status="SCHEDULED", home_goals=None, away_goals=None):
+def fixture_payload(fixture_id, home, away, *, status="SCHEDULED", home_goals=None, away_goals=None, kickoff_at=None):
     return {
         "id": fixture_id,
-        "utcDate": "2026-06-24T18:00:00+00:00",
+        "utcDate": (kickoff_at or django_timezone.now() + timedelta(days=1)).isoformat(),
         "status": status,
         "homeTeam": {"name": home},
         "awayTeam": {"name": away},
@@ -76,6 +77,18 @@ class WorldCupSyncTests(TestCase, WorldCupFactoryMixin):
         self.assertEqual(WorldCupMarket.objects.filter(trip=first).count(), 3)
         self.assertEqual(WorldCupMarket.objects.filter(trip=second).count(), 3)
         self.assertEqual(client.calls, [{}])
+
+    def test_live_fixture_is_materialized_but_not_tradeable(self):
+        trip = self.make_trip()
+
+        totals = sync_world_cup(FakeClient([
+            fixture_payload(4, "Spain", "Morocco", status="IN_PLAY", kickoff_at=django_timezone.now() - timedelta(minutes=5)),
+        ]), full=True)
+
+        self.assertEqual(totals, {"fixtures": 1, "markets": 1, "settled": 0})
+        market = trip_results(trip)["markets"][0]
+        self.assertEqual(market["world_cup"]["status"], "live")
+        self.assertFalse(market["is_tradeable"])
 
     def test_sync_is_idempotent_and_new_trip_receives_known_fixture_markets(self):
         existing = self.make_trip("Existing")
@@ -179,6 +192,21 @@ class WorldCupMarketIntegrationTests(TestCase, WorldCupFactoryMixin):
 
         self.assertEqual(rejected.status_code, 400)
         self.assertEqual(accepted.status_code, 200)
+
+    def test_started_world_cup_fixture_rejects_trades(self):
+        self.link.fixture.kickoff_at = django_timezone.now() - timedelta(seconds=1)
+        self.link.fixture.save(update_fields=["kickoff_at"])
+        automatic_url = reverse("market_trade_api", args=[self.trip.public_id, self.link.market_id])
+
+        response = self.client.post(
+            automatic_url,
+            data='{"name":"Maya","outcome":"yes","chips":1}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        market = {market["id"]: market for market in trip_results(self.trip)["markets"]}[self.link.market_id]
+        self.assertFalse(market["is_tradeable"])
 
     def test_create_trip_materializes_existing_world_cup_markets(self):
         response = self.client.post(reverse("create_trip"), {

@@ -2,10 +2,10 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Count, F
+from django.db.models import Count
 from django.utils import timezone
 
-from .models import Availability, DailyBeercoinGrant, Participant, Proposal
+from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Participant, Proposal
 
 
 DAILY_BEERCOIN_MILLIS = 10_000
@@ -28,9 +28,17 @@ def grant_daily_beercoins(grant_date=None):
         )
         if not created:
             return grant, 0
-        recipient_count = Participant.objects.update(
-            beer_chip_millis=F("beer_chip_millis") + grant.amount_millis,
-        )
+        participants = list(Participant.objects.select_for_update().all())
+        for participant in participants:
+            participant.beer_chip_millis += grant.amount_millis
+            participant.save(update_fields=["beer_chip_millis"])
+            ChipBalanceEvent.objects.create(
+                participant=participant,
+                amount_millis=grant.amount_millis,
+                balance_after_millis=participant.beer_chip_millis,
+                reason=ChipBalanceEvent.Reason.DAILY_GRANT,
+            )
+        recipient_count = len(participants)
     return grant, recipient_count
 
 
@@ -74,6 +82,57 @@ def idea_leaderboard(trip):
     return entries
 
 
+def chip_leaderboard(trip):
+    """Return the trip's participants ranked by their current Beer Chip balance."""
+    entries = [{
+        "name": participant.name,
+        "beer_chip_millis": participant.beer_chip_millis,
+    } for participant in trip.participants.all()]
+    entries.sort(key=lambda entry: (-entry["beer_chip_millis"], entry["name"].casefold()))
+    for position, entry in enumerate(entries, start=1):
+        whole_chips, fractional_millis = divmod(entry["beer_chip_millis"], 1000)
+        entry["chip_balance"] = (
+            str(whole_chips)
+            if not fractional_millis
+            else f"{whole_chips}.{fractional_millis:03d}".rstrip("0")
+        )
+        entry["rank"] = position
+    return entries
+
+
+def chip_holdings_history(trip):
+    """Return timestamped chip-balance series suitable for the leaderboard chart."""
+    participants = list(trip.participants.all())
+    events = list(
+        ChipBalanceEvent.objects.filter(participant__trip=trip)
+        .select_related("participant")
+        .order_by("created_at", "id")
+    )
+    timestamps = sorted({event.created_at for event in events})
+    events_by_participant = defaultdict(lambda: defaultdict(list))
+    for event in events:
+        events_by_participant[event.participant_id][event.created_at].append(event)
+
+    series = []
+    for participant in participants:
+        running_balance = 0
+        started = False
+        points = []
+        participant_events = events_by_participant[participant.id]
+        for timestamp in timestamps:
+            if timestamp in participant_events:
+                running_balance = participant_events[timestamp][-1].balance_after_millis
+                started = True
+            if started:
+                points.append({
+                    "timestamp": timestamp.isoformat(),
+                    "balance_millis": running_balance,
+                })
+        if points:
+            series.append({"name": participant.name, "points": points})
+    return series
+
+
 def trip_results(trip):
     participants = list(trip.participants.prefetch_related("availabilities"))
     days = list(date_range(trip.start_date, trip.end_date))
@@ -90,6 +149,7 @@ def trip_results(trip):
             for day in days
         )
     ]
+    active_participant_ids = {participant.id for participant in scoring_participants}
 
     daily = []
     for day in days:
@@ -325,9 +385,11 @@ def trip_results(trip):
     return {
         "daily": daily,
         "windows": windows,
+        "active_participant_count": len(scoring_participants),
         "participants": [{
             "id": participant.id,
             "name": participant.name,
+            "is_active": participant.id in active_participant_ids,
             "minimum_attendance_days": participant.minimum_attendance_days,
             "idea_karma": (
                 karma_by_participant[participant.id]["post_count"]

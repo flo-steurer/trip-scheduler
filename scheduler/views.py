@@ -14,8 +14,8 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import TripForm
-from .models import Availability, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
-from .services import idea_leaderboard, trip_results
+from .models import Availability, ChipBalanceEvent, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
+from .services import chip_holdings_history, chip_leaderboard, idea_leaderboard, trip_results
 from world_cup.models import WorldCupMarket
 from world_cup.services import materialize_world_cup_markets_for_trip
 
@@ -155,6 +155,16 @@ def leaderboard(request, public_id):
     return render(request, "scheduler/leaderboard.html", {
         "trip": trip,
         "leaderboard": idea_leaderboard(trip),
+    })
+
+
+@require_GET
+def chip_leaderboard_view(request, public_id):
+    trip = _trip(public_id)
+    return render(request, "scheduler/chip_leaderboard.html", {
+        "trip": trip,
+        "leaderboard": chip_leaderboard(trip),
+        "chip_holdings_history": chip_holdings_history(trip),
     })
 
 
@@ -368,6 +378,12 @@ def market_trade_api(request, public_id, market_id):
         shares_millis = market.shares_for_cost(existing_trades, outcome, chip_millis)
         participant.beer_chip_millis -= chip_millis
         participant.save(update_fields=["beer_chip_millis"])
+        ChipBalanceEvent.objects.create(
+            participant=participant,
+            amount_millis=-chip_millis,
+            balance_after_millis=participant.beer_chip_millis,
+            reason=ChipBalanceEvent.Reason.MARKET_TRADE,
+        )
         MarketTrade.objects.create(
             market=market,
             participant=participant,

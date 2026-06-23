@@ -8,8 +8,8 @@ from django.test import override_settings
 from django.urls import reverse
 from django.contrib.staticfiles import finders
 
-from .models import Availability, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
-from .services import grant_daily_beercoins, idea_leaderboard, trip_results
+from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
+from .services import chip_holdings_history, chip_leaderboard, grant_daily_beercoins, idea_leaderboard, trip_results
 
 
 class TripFactoryMixin:
@@ -44,6 +44,7 @@ class TripFormTests(TestCase):
         self.assertIsNotNone(finders.find("scheduler/app.css"))
         self.assertIsNotNone(finders.find("scheduler/trip.js"))
         self.assertIsNotNone(finders.find("scheduler/beermarket.js"))
+        self.assertIsNotNone(finders.find("scheduler/chip_leaderboard.js"))
 
     def test_calendar_uses_millisecond_chip_balances(self):
         with open(finders.find("scheduler/trip.js"), encoding="utf-8") as script:
@@ -51,6 +52,7 @@ class TripFormTests(TestCase):
 
         self.assertIn("person.beer_chip_millis", contents)
         self.assertNotIn("person.beer_chips", contents)
+        self.assertIn("person.is_active", contents)
 
     def test_beermarket_groups_world_cup_markets_separately(self):
         with open(finders.find("scheduler/beermarket.js"), encoding="utf-8") as script:
@@ -59,6 +61,10 @@ class TripFormTests(TestCase):
         self.assertIn("renderWorldCupMarkets", contents)
         self.assertIn("renderOtherMarkets", contents)
         self.assertIn("Show ${settled.length} settled match", contents)
+        self.assertIn("collapsedMarketSections", contents)
+        self.assertIn("aria-expanded", contents)
+        self.assertIn("fixtureIsLive", contents)
+        self.assertIn("fixture.kickoff_at", contents)
 
     def test_trip_page_uses_absolute_static_asset_urls(self):
         trip = Trip.objects.create(
@@ -247,11 +253,15 @@ class ResultsTests(TestCase, TripFactoryMixin):
         })
         self.person(trip, "Cy")
 
-        window = trip_results(trip)["windows"][0]
+        results = trip_results(trip)
+        window = results["windows"][0]
 
         self.assertEqual(window["eligible_attendees"], ["Ari"])
         self.assertEqual(window["attendance_rate"], 100)
         self.assertEqual(window["below_minimum"], [])
+        self.assertEqual(results["active_participant_count"], 1)
+        active_by_name = {participant["name"]: participant["is_active"] for participant in results["participants"]}
+        self.assertEqual(active_by_name, {"Ari": True, "Bea": False, "Cy": False})
 
     def test_daily_beercoins_are_awarded_once_per_day(self):
         trip = self.make_trip()
@@ -308,6 +318,42 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual([(entry["name"], entry["karma"]) for entry in leaderboard], [("Ari", 3), ("Bea", 2), ("Cam", 0)])
         self.assertEqual(leaderboard[0]["title"], "Upvote Magnet")
 
+    def test_chip_leaderboard_ranks_balances_then_names(self):
+        trip = self.make_trip()
+        ari = self.person(trip, "Ari")
+        bea = self.person(trip, "Bea")
+        cam = self.person(trip, "Cam")
+        ari.beer_chip_millis = 9500
+        bea.beer_chip_millis = 12000
+        cam.beer_chip_millis = 12000
+        ari.save(update_fields=["beer_chip_millis"])
+        bea.save(update_fields=["beer_chip_millis"])
+        cam.save(update_fields=["beer_chip_millis"])
+
+        leaderboard = chip_leaderboard(trip)
+
+        self.assertEqual(
+            [(entry["name"], entry["chip_balance"]) for entry in leaderboard],
+            [("Bea", "12"), ("Cam", "12"), ("Ari", "9.5")],
+        )
+
+    def test_chip_holdings_history_records_opening_and_daily_grant_balances(self):
+        trip = self.make_trip()
+        self.person(trip, "Ari")
+
+        grant_daily_beercoins(date(2026, 7, 1))
+
+        history = chip_holdings_history(trip)
+        self.assertEqual(history[0]["name"], "Ari")
+        self.assertEqual(
+            [point["balance_millis"] for point in history[0]["points"]],
+            [10000, 20000],
+        )
+        self.assertEqual(
+            list(ChipBalanceEvent.objects.values_list("reason", flat=True)),
+            [ChipBalanceEvent.Reason.OPENING_BALANCE, ChipBalanceEvent.Reason.DAILY_GRANT],
+        )
+
 
 class LeaderboardPageTests(TestCase, TripFactoryMixin):
     def test_leaderboard_page_shows_score_breakdown_and_back_link(self):
@@ -321,6 +367,21 @@ class LeaderboardPageTests(TestCase, TripFactoryMixin):
         self.assertContains(response, "Ari")
         self.assertContains(response, "1 post")
         self.assertContains(response, "1 upvote")
+        self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
+
+    def test_chip_leaderboard_page_shows_balances_and_back_link(self):
+        trip = self.make_trip()
+        ari = self.person(trip, "Ari")
+        ari.beer_chip_millis = 7500
+        ari.save(update_fields=["beer_chip_millis"])
+
+        response = self.client.get(reverse("chip_leaderboard", args=[trip.public_id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Beer Chips")
+        self.assertContains(response, "7.5 chips")
+        self.assertContains(response, 'id="chip-history-chart"')
+        self.assertContains(response, 'src="/static/scheduler/chip_leaderboard.js"')
         self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
 
 
@@ -338,6 +399,7 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         self.assertEqual(first.status_code, 200)
         participant = Participant.objects.get()
         self.assertEqual(participant.beer_chip_millis, 7000)
+        self.assertEqual(participant.chip_balance_events.last().reason, ChipBalanceEvent.Reason.MARKET_TRADE)
         self.assertEqual(MarketTrade.objects.get().outcome, "yes")
         self.assertEqual(MarketTrade.objects.get().entry_odds, 50)
         market = first.json()["results"]["markets"][0]
@@ -365,6 +427,7 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         self.assertEqual(ari.beer_karma_bonus, 0)
         self.assertEqual(maya.beer_chip_millis, 10000)
         self.assertEqual(ari.beer_chip_millis, 8000)
+        self.assertEqual(maya.chip_balance_events.last().reason, ChipBalanceEvent.Reason.MARKET_PAYOUT)
         self.assertTrue(self.market.is_resolved)
 
         rejected = self.post_json({"name": "Maya", "outcome": "no", "chips": 1})
