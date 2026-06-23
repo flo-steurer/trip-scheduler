@@ -288,7 +288,10 @@
     const start = localDate(app.dataset.startDate); const end = localDate(app.dataset.endDate);
     results.participants.forEach((person) => {
       const card = document.createElement('article'); card.className = 'person-card';
-      const name = document.createElement('h3'); name.textContent = person.name; card.append(name);
+      const heading = document.createElement('div'); heading.className = 'person-card-heading';
+      const name = document.createElement('h3'); name.textContent = person.name;
+      const karma = document.createElement('span'); karma.className = 'person-karma'; karma.textContent = `✦ ${person.idea_karma || 0} beer karma`;
+      heading.append(name, karma); card.append(heading);
       const minimum = document.createElement('p'); minimum.className = 'participant-minimum'; minimum.textContent = `Minimum: ${minimumAttendanceLabel(person.minimum_attendance_days)}`; card.append(minimum);
       const mini = document.createElement('div'); mini.className = 'mini-calendar';
       for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {

@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.contrib.staticfiles import finders
 
 from .models import Availability, Participant, Proposal, ProposalVote, Trip
-from .services import trip_results
+from .services import idea_leaderboard, trip_results
 
 
 class TripFactoryMixin:
@@ -217,6 +217,38 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(proposals[0]["title"], "Villa Mare")
         self.assertEqual(proposals[0]["voter_names"], ["Ari", "Bea"])
         self.assertEqual(proposals[1]["title"], "Sicily")
+        participants = {participant["name"]: participant for participant in trip_results(trip)["participants"]}
+        self.assertEqual(participants["Ari"]["idea_karma"], 1)
+        self.assertEqual(participants["Bea"]["idea_karma"], 3)
+
+    def test_idea_leaderboard_ranks_karma_then_upvotes(self):
+        trip = self.make_trip()
+        ari = self.person(trip, "Ari")
+        bea = self.person(trip, "Bea")
+        cam = self.person(trip, "Cam")
+        ari_post = Proposal.objects.create(trip=trip, submitted_by=ari, type="destination", title="Sicily")
+        bea_post = Proposal.objects.create(trip=trip, submitted_by=bea, type="stay", title="Villa Mare")
+        ProposalVote.objects.create(proposal=ari_post, participant=bea)
+        ProposalVote.objects.create(proposal=ari_post, participant=cam)
+        ProposalVote.objects.create(proposal=bea_post, participant=ari)
+        leaderboard = idea_leaderboard(trip)
+        self.assertEqual([(entry["name"], entry["karma"]) for entry in leaderboard], [("Ari", 3), ("Bea", 2), ("Cam", 0)])
+        self.assertEqual(leaderboard[0]["title"], "Upvote Magnet")
+
+
+class LeaderboardPageTests(TestCase, TripFactoryMixin):
+    def test_leaderboard_page_shows_score_breakdown_and_back_link(self):
+        trip = self.make_trip()
+        ari = self.person(trip, "Ari")
+        proposal = Proposal.objects.create(trip=trip, submitted_by=ari, type="destination", title="Sicily")
+        ProposalVote.objects.create(proposal=proposal, participant=ari)
+        response = self.client.get(reverse("leaderboard", args=[trip.public_id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Beer Karma")
+        self.assertContains(response, "Ari")
+        self.assertContains(response, "1 post")
+        self.assertContains(response, "1 upvote")
+        self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
 
 
 class ProposalApiTests(TestCase, TripFactoryMixin):

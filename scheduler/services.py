@@ -1,6 +1,8 @@
 from collections import defaultdict
 from datetime import timedelta
 
+from django.db.models import Count
+
 from .models import Availability, Proposal
 
 
@@ -9,6 +11,41 @@ def date_range(start, end):
     while current <= end:
         yield current
         current += timedelta(days=1)
+
+
+def idea_leaderboard(trip):
+    """Return the trip's proposal contributors ranked by received support."""
+    participants = trip.participants.annotate(
+        post_count=Count("proposals", distinct=True),
+        upvote_count=Count("proposals__votes", distinct=True),
+    )
+    entries = []
+    for participant in participants:
+        karma = participant.post_count + participant.upvote_count
+        if karma >= 8:
+            title = "Itinerary Overlord"
+        elif participant.upvote_count >= participant.post_count and karma:
+            title = "Upvote Magnet"
+        elif participant.post_count:
+            title = "Idea Machine"
+        else:
+            title = "Mysterious Lurker"
+        entries.append({
+            "name": participant.name,
+            "post_count": participant.post_count,
+            "upvote_count": participant.upvote_count,
+            "karma": karma,
+            "title": title,
+        })
+    entries.sort(key=lambda entry: (
+        -entry["karma"],
+        -entry["upvote_count"],
+        -entry["post_count"],
+        entry["name"].casefold(),
+    ))
+    for position, entry in enumerate(entries, start=1):
+        entry["rank"] = position
+    return entries
 
 
 def trip_results(trip):
@@ -106,9 +143,17 @@ def trip_results(trip):
     proposals = list(
         trip.proposals.select_related("submitted_by").prefetch_related("votes__participant")
     )
+    karma_by_participant = {
+        participant.id: {"post_count": 0, "upvote_count": 0}
+        for participant in participants
+    }
     proposal_results = []
     for proposal in proposals:
-        voter_names = sorted(vote.participant.name for vote in proposal.votes.all())
+        karma_by_participant[proposal.submitted_by_id]["post_count"] += 1
+        votes = list(proposal.votes.all())
+        for vote in votes:
+            karma_by_participant[proposal.submitted_by_id]["upvote_count"] += 1
+        voter_names = sorted(vote.participant.name for vote in votes)
         proposal_results.append({
             "id": proposal.id,
             "type": proposal.type,
@@ -134,6 +179,10 @@ def trip_results(trip):
             "id": participant.id,
             "name": participant.name,
             "minimum_attendance_days": participant.minimum_attendance_days,
+            "idea_karma": (
+                karma_by_participant[participant.id]["post_count"]
+                + karma_by_participant[participant.id]["upvote_count"]
+            ),
             "availability": {day.isoformat(): status for day, status in status_by_person[participant.id].items()},
         } for participant in participants],
         "proposals": proposal_results,

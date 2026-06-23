@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Idea leaderboard · {{ trip.title }}{% endblock %}
+{% block header_action %}<a class="text-link" href="{% url 'trip_detail' trip.public_id %}">Back to trip</a>{% endblock %}
+{% block content %}
+<div class="shell leaderboard-shell">
+  <section class="leaderboard-heading">
+    <p class="eyebrow">Trip ideas</p>
+    <h1>Beer Karma</h1>
+    <p>{{ trip.title }}’s extremely serious ranking of who has posted the most compelling questionable plans.</p>
+    <p class="leaderboard-rule">1 point per post + 1 point per upvote received. Ties go to more upvotes, then more posts.</p>
+  </section>
+
+  <section class="leaderboard-card card" aria-labelledby="leaderboard-title">
+    <div class="section-heading"><div><p class="eyebrow">The standings</p><h2 id="leaderboard-title">High Council of Itineraries</h2></div><span class="karma-explainer">✦ Beer Karma</span></div>
+    {% if leaderboard %}
+      <ol class="leaderboard-list">
+        {% for entry in leaderboard %}
+          <li class="leaderboard-entry {% if entry.rank == 1 %}leaderboard-leader{% endif %}">
+            <span class="leaderboard-rank">{% if entry.rank == 1 %}👑{% else %}{{ entry.rank }}{% endif %}</span>
+            <div class="leaderboard-person"><strong>{{ entry.name }}</strong><span>{{ entry.title }}</span></div>
+            <div class="leaderboard-stats"><span>{{ entry.post_count }} post{{ entry.post_count|pluralize }}</span><span>{{ entry.upvote_count }} upvote{{ entry.upvote_count|pluralize }}</span></div>
+            <strong class="karma-score">{{ entry.karma }} <span>karma</span></strong>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="empty">No one has joined this trip yet. The crown remains unclaimed.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

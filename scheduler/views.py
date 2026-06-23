@@ -14,7 +14,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from .forms import TripForm
 from .models import Availability, Participant, Proposal, ProposalVote, Trip
-from .services import trip_results
+from .services import idea_leaderboard, trip_results
 
 
 activity_logger = logging.getLogger("scheduler.activity")
@@ -141,6 +141,15 @@ def trip_detail(request, public_id):
         "trip": trip,
         "initial_results": trip_results(trip),
         "share_url": share_url,
+    })
+
+
+@require_GET
+def leaderboard(request, public_id):
+    trip = _trip(public_id)
+    return render(request, "scheduler/leaderboard.html", {
+        "trip": trip,
+        "leaderboard": idea_leaderboard(trip),
     })
 
 
