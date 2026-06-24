@@ -370,7 +370,10 @@
     if (!comparable.length) return document.createDocumentFragment();
     const wrap = document.createElement('div'); wrap.className = 'villa-comparison-wrap';
     const intro = document.createElement('p'); intro.className = 'villa-comparison-note';
-    intro.textContent = `Comparison uses ${results.active_participant_count} active participant${results.active_participant_count === 1 ? '' : 's'} for per-person cost.`;
+    const topCapacity = results.windows[0]?.maximum_villa_capacity || 0;
+    intro.textContent = topCapacity
+      ? `Per-person cost uses the top range’s peak of ${topCapacity} possible guest${topCapacity === 1 ? '' : 's'}, capped at each villa’s Sleeps value.`
+      : 'Per-person cost will appear once a possible trip range is available.';
     const capacityKinds = proposals.map(stayCapacityKind);
     if (capacityKinds.some(Boolean)) {
       const legend = document.createElement('p'); legend.className = 'villa-capacity-legend';
@@ -396,7 +399,7 @@
       const cells = [
         proposal.title,
         formatMoney(proposal.total_price, proposal.currency) || '—',
-        formatMoney(proposal.price_per_active_person, proposal.currency) || '—',
+        formatMoney(proposal.price_per_best_window_person, proposal.currency) || '—',
         proposal.sleeps ? `${proposal.sleeps} sleeps${proposal.bedrooms ? ` · ${proposal.bedrooms} BR` : ''}` : (proposal.bedrooms ? `${proposal.bedrooms} BR` : '—'),
         proposal.location || '—',
         `${proposal.booking_count} interested`,
@@ -430,7 +433,7 @@
       if (details.length) { const detail = document.createElement('p'); detail.className = 'villa-details'; detail.textContent = details.join(' · '); card.append(detail); }
       if (proposal.total_price !== null) {
         const cost = document.createElement('p'); cost.className = 'proposal-price';
-        const perPerson = formatMoney(proposal.price_per_active_person, proposal.currency);
+        const perPerson = formatMoney(proposal.price_per_best_window_person, proposal.currency);
         cost.textContent = `${formatMoney(proposal.total_price, proposal.currency)} total${perPerson ? ` · ${perPerson} per active person` : ''}`;
         card.append(cost);
       }

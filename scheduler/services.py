@@ -446,6 +446,7 @@ def trip_results(trip):
             "votes__participant", "booking_interests__participant"
         )
     )
+    best_window_capacity = windows[0]["maximum_villa_capacity"] if windows else 0
     karma_by_participant = {
         participant.id: {"post_count": 0, "upvote_count": 0}
         for participant in participants
@@ -458,9 +459,10 @@ def trip_results(trip):
             karma_by_participant[proposal.submitted_by_id]["upvote_count"] += 1
         voter_names = sorted(vote.participant.name for vote in votes)
         booking_names = sorted(interest.participant.name for interest in proposal.booking_interests.all())
-        price_per_active_person = (
-            proposal.total_price / len(scoring_participants)
-            if proposal.total_price is not None and scoring_participants
+        price_person_count = min(best_window_capacity, proposal.sleeps) if proposal.sleeps else best_window_capacity
+        price_per_best_window_person = (
+            proposal.total_price / price_person_count
+            if proposal.total_price is not None and price_person_count
             else None
         )
         proposal_results.append({
@@ -477,7 +479,7 @@ def trip_results(trip):
             "bedrooms": proposal.bedrooms,
             "sleeps": proposal.sleeps,
             "cancellation_terms": proposal.cancellation_terms,
-            "price_per_active_person": price_per_active_person,
+            "price_per_best_window_person": price_per_best_window_person,
             "submitted_by": proposal.submitted_by.name,
             "voter_names": voter_names,
             "vote_count": len(voter_names),

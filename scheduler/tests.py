@@ -352,6 +352,36 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(participants["Ari"]["idea_karma"], 1)
         self.assertEqual(participants["Bea"]["idea_karma"], 3)
 
+    def test_stay_price_uses_the_smaller_of_best_window_peak_and_villa_sleeps(self):
+        trip = self.make_trip(end_date=date(2026, 7, 4), duration_days=2)
+        ari = self.person(trip, "Ari", {
+            date(2026, 7, 1): "available",
+            date(2026, 7, 2): "available",
+        })
+        self.person(trip, "Bea", {
+            date(2026, 7, 1): "available",
+            date(2026, 7, 2): "available",
+        })
+        self.person(trip, "Cam", {
+            date(2026, 7, 3): "available",
+            date(2026, 7, 4): "available",
+        })
+        Proposal.objects.create(
+            trip=trip,
+            submitted_by=ari,
+            type=Proposal.Type.STAY,
+            title="Villa Mare",
+            total_price="1000.00",
+            currency="EUR",
+            sleeps=1,
+        )
+
+        results = trip_results(trip)
+
+        self.assertEqual(results["active_participant_count"], 3)
+        self.assertEqual(results["windows"][0]["maximum_villa_capacity"], 2)
+        self.assertEqual(results["proposals"][0]["price_per_best_window_person"], 1000)
+
     def test_idea_leaderboard_ranks_karma_then_upvotes(self):
         trip = self.make_trip()
         ari = self.person(trip, "Ari")
@@ -714,7 +744,7 @@ class ProposalApiTests(TestCase, TripFactoryMixin):
         self.assertEqual(proposal.currency, "EUR")
         self.assertEqual(proposal.price, "€3,200 / week")
         result = response.json()["results"]["proposals"][0]
-        self.assertEqual(result["price_per_active_person"], "3200.00")
+        self.assertEqual(result["price_per_best_window_person"], "3200.00")
         self.assertEqual(result["booking_count"], 0)
 
         booking_url = reverse("proposal_booking_interest_api", args=[self.trip.public_id, proposal.id])
