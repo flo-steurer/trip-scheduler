@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.contrib.staticfiles import finders
 
 from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
-from .services import chip_holdings_history, chip_leaderboard, grant_daily_beercoins, idea_leaderboard, trip_results
+from .services import chip_holdings_history, chip_leaderboard, grant_daily_beercoins, idea_leaderboard, market_performance, trip_results
 
 
 class TripFactoryMixin:
@@ -378,6 +378,54 @@ class ResultsTests(TestCase, TripFactoryMixin):
             [ChipBalanceEvent.Reason.OPENING_BALANCE, ChipBalanceEvent.Reason.DAILY_GRANT],
         )
 
+    def test_market_performance_uses_only_settled_share_markets_and_ranks_final_net_results(self):
+        trip = self.make_trip()
+        ari = self.person(trip, "Ari")
+        bea = self.person(trip, "Bea")
+        cam = self.person(trip, "Cam")
+        settled_yes = Market.objects.create(trip=trip, question="Settled yes", resolved_outcome=Market.Outcome.YES)
+        settled_no = Market.objects.create(trip=trip, question="Settled no", resolved_outcome=Market.Outcome.NO)
+        open_market = Market.objects.create(trip=trip, question="Open")
+        legacy = Market.objects.create(trip=trip, question="Legacy", pricing_model=Market.PricingModel.LEGACY, resolved_outcome=Market.Outcome.YES)
+        MarketTrade.objects.bulk_create([
+            MarketTrade(market=settled_yes, participant=ari, outcome="yes", chips=3, cost_millis=3000, shares_millis=6000),
+            MarketTrade(market=settled_yes, participant=bea, outcome="no", chips=5, cost_millis=5000, shares_millis=1000),
+            MarketTrade(market=settled_no, participant=ari, outcome="yes", chips=2, cost_millis=2000, shares_millis=1000),
+            MarketTrade(market=settled_no, participant=bea, outcome="no", chips=1, cost_millis=1000, shares_millis=4000),
+            MarketTrade(market=open_market, participant=cam, outcome="yes", chips=9, cost_millis=9000, shares_millis=18000),
+            MarketTrade(market=legacy, participant=cam, outcome="yes", chips=8, cost_millis=8000, shares_millis=16000),
+        ])
+
+        performance = market_performance(trip)
+
+        self.assertEqual([(entry["name"], entry["net"], entry["wins"], entry["losses"]) for entry in performance["entries"]], [
+            ("Ari", "+1", 1, 1),
+            ("Bea", "-2", 1, 1),
+        ])
+        self.assertEqual(performance["entries"][0]["spent"], "5")
+        self.assertEqual(performance["entries"][0]["payout"], "6")
+        self.assertEqual(performance["biggest_winner"]["name"], "Ari")
+        self.assertEqual(performance["biggest_loser"]["name"], "Bea")
+
+    def test_market_performance_orders_tied_break_even_entries_by_name_and_has_no_highlights(self):
+        trip = self.make_trip()
+        bea = self.person(trip, "Bea")
+        ari = self.person(trip, "Ari")
+        market = Market.objects.create(trip=trip, question="Even", resolved_outcome=Market.Outcome.YES)
+        MarketTrade.objects.bulk_create([
+            MarketTrade(market=market, participant=bea, outcome="yes", chips=2, cost_millis=2000, shares_millis=2000),
+            MarketTrade(market=market, participant=ari, outcome="yes", chips=2, cost_millis=2000, shares_millis=2000),
+        ])
+
+        performance = market_performance(trip)
+
+        self.assertEqual([(entry["name"], entry["net"], entry["wins"], entry["losses"]) for entry in performance["entries"]], [
+            ("Ari", "0", 0, 0),
+            ("Bea", "0", 0, 0),
+        ])
+        self.assertIsNone(performance["biggest_winner"])
+        self.assertIsNone(performance["biggest_loser"])
+
 
 class LeaderboardPageTests(TestCase, TripFactoryMixin):
     def test_leaderboard_page_shows_score_breakdown_and_back_link(self):
@@ -405,6 +453,8 @@ class LeaderboardPageTests(TestCase, TripFactoryMixin):
         self.assertContains(response, "Beer Chips")
         self.assertContains(response, "7.5 chips")
         self.assertContains(response, 'id="chip-history-chart"')
+        self.assertContains(response, "Market performance")
+        self.assertContains(response, "No settled share-market trades yet")
         self.assertContains(response, 'src="/static/scheduler/vendor/echarts.common.min.js"')
         self.assertContains(response, 'src="/static/scheduler/chip_leaderboard.js"')
         self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))

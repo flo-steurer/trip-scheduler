@@ -5,7 +5,7 @@ from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
-from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Participant, Proposal
+from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Market, Participant, Proposal
 
 
 DAILY_BEERCOIN_MILLIS = 10_000
@@ -98,6 +98,83 @@ def chip_leaderboard(trip):
         )
         entry["rank"] = position
     return entries
+
+
+def _format_chip_millis(amount_millis, include_sign=False):
+    whole_chips, fractional_millis = divmod(abs(amount_millis), 1000)
+    value = (
+        str(whole_chips)
+        if not fractional_millis
+        else f"{whole_chips}.{fractional_millis:03d}".rstrip("0")
+    )
+    if include_sign and amount_millis > 0:
+        return f"+{value}"
+    if amount_millis < 0:
+        return f"-{value}"
+    return value
+
+
+def market_performance(trip):
+    """Return final P/L for participants in settled share markets only."""
+    markets = trip.markets.filter(
+        pricing_model=Market.PricingModel.SHARES,
+        cancelled_at__isnull=True,
+        resolved_outcome__in=Market.Outcome.values,
+    ).prefetch_related("trades__participant")
+    totals = {}
+
+    for market in markets:
+        results_by_participant = defaultdict(lambda: {"spent_millis": 0, "payout_millis": 0, "name": ""})
+        for trade in market.trades.all():
+            result = results_by_participant[trade.participant_id]
+            result["name"] = trade.participant.name
+            result["spent_millis"] += (
+                trade.cost_millis
+                if trade.cost_millis is not None
+                else trade.chips * Market.SHARE_SCALE
+            )
+            if trade.outcome == market.resolved_outcome:
+                result["payout_millis"] += (
+                    trade.shares_millis
+                    if trade.shares_millis is not None
+                    else trade.chips * Market.SHARE_SCALE
+                )
+
+        for participant_id, result in results_by_participant.items():
+            entry = totals.setdefault(participant_id, {
+                "name": result["name"],
+                "spent_millis": 0,
+                "payout_millis": 0,
+                "wins": 0,
+                "losses": 0,
+                "market_count": 0,
+            })
+            entry["spent_millis"] += result["spent_millis"]
+            entry["payout_millis"] += result["payout_millis"]
+            entry["market_count"] += 1
+            net_millis = result["payout_millis"] - result["spent_millis"]
+            if net_millis > 0:
+                entry["wins"] += 1
+            elif net_millis < 0:
+                entry["losses"] += 1
+
+    entries = []
+    for entry in totals.values():
+        entry["net_millis"] = entry["payout_millis"] - entry["spent_millis"]
+        entry["spent"] = _format_chip_millis(entry["spent_millis"])
+        entry["payout"] = _format_chip_millis(entry["payout_millis"])
+        entry["net"] = _format_chip_millis(entry["net_millis"], include_sign=True)
+        entry["net_kind"] = "gain" if entry["net_millis"] > 0 else "loss" if entry["net_millis"] < 0 else "even"
+        entries.append(entry)
+    entries.sort(key=lambda entry: (-entry["net_millis"], entry["name"].casefold()))
+    for rank, entry in enumerate(entries, start=1):
+        entry["rank"] = rank
+
+    return {
+        "entries": entries,
+        "biggest_winner": next((entry for entry in entries if entry["net_millis"] > 0), None),
+        "biggest_loser": next((entry for entry in reversed(entries) if entry["net_millis"] < 0), None),
+    }
 
 
 def chip_holdings_history(trip):

@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from .forms import TripForm
 from .models import Availability, ChipBalanceEvent, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
-from .services import chip_holdings_history, chip_leaderboard, idea_leaderboard, trip_results
+from .services import chip_holdings_history, chip_leaderboard, idea_leaderboard, market_performance, trip_results
 from world_cup.models import WorldCupMarket
 from world_cup.services import materialize_world_cup_markets_for_trip
 
@@ -187,6 +187,7 @@ def chip_leaderboard_view(request, public_id):
         "trip": trip,
         "leaderboard": chip_leaderboard(trip),
         "chip_holdings_history": chip_holdings_history(trip),
+        "market_performance": market_performance(trip),
     })
 
 

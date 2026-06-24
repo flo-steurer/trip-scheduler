@@ -28,6 +28,29 @@
     {% endif %}
   </section>
 
+  <section class="market-performance-card card" aria-labelledby="market-performance-title">
+    <div class="section-heading"><div><p class="eyebrow">Settled markets</p><h2 id="market-performance-title">Market performance</h2></div><span class="karma-explainer">Realized P/L</span></div>
+    {% if market_performance.entries %}
+      <div class="market-performance-highlights">
+        {% if market_performance.biggest_winner %}<p><span>Biggest winner</span><strong>{{ market_performance.biggest_winner.name }} · {{ market_performance.biggest_winner.net }} chips</strong></p>{% endif %}
+        {% if market_performance.biggest_loser %}<p><span>Biggest loser</span><strong>{{ market_performance.biggest_loser.name }} · {{ market_performance.biggest_loser.net }} chips</strong></p>{% endif %}
+      </div>
+      <div class="market-performance-table-wrap">
+        <table class="market-performance-table">
+          <thead><tr><th scope="col">Trader</th><th scope="col">Net</th><th scope="col">Spent</th><th scope="col">Payout</th><th scope="col">W–L</th></tr></thead>
+          <tbody>
+            {% for entry in market_performance.entries %}
+              <tr class="{{ entry.net_kind }}"><th scope="row"><span class="performance-rank">{{ entry.rank }}</span>{{ entry.name }}</th><td><strong>{{ entry.net }} chips</strong></td><td>{{ entry.spent }}</td><td>{{ entry.payout }}</td><td>{{ entry.wins }}–{{ entry.losses }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="market-performance-note">Final results from settled share markets only. W–L counts profitable and losing markets; break-even markets are neutral.</p>
+    {% else %}
+      <p class="empty">No settled share-market trades yet. Results will appear here once a market closes.</p>
+    {% endif %}
+  </section>
+
   <section class="chip-history-card card" aria-labelledby="chip-history-title">
     <div class="section-heading"><div><p class="eyebrow">Balance history</p><h2 id="chip-history-title">Holdings over time</h2></div><span class="karma-explainer">Beer Chips</span></div>
     <div id="chip-history-chart" class="chip-history-chart" aria-live="polite"></div>
