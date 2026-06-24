@@ -357,12 +357,33 @@
     });
   }
 
+  function stayCapacityKind(proposal) {
+    const topWindow = results.windows[0];
+    if (!proposal.sleeps || !topWindow || proposal.sleeps >= topWindow.maximum_villa_capacity) return '';
+    return proposal.sleeps < topWindow.maximum_confirmed_villa_capacity
+      ? 'confirmed-shortfall'
+      : 'possible-shortfall';
+  }
+
   function villaComparison(proposals) {
     const comparable = proposals.filter((proposal) => proposal.total_price !== null || proposal.sleeps || proposal.bedrooms || proposal.location);
     if (!comparable.length) return document.createDocumentFragment();
     const wrap = document.createElement('div'); wrap.className = 'villa-comparison-wrap';
     const intro = document.createElement('p'); intro.className = 'villa-comparison-note';
     intro.textContent = `Comparison uses ${results.active_participant_count} active participant${results.active_participant_count === 1 ? '' : 's'} for per-person cost.`;
+    const capacityKinds = proposals.map(stayCapacityKind);
+    if (capacityKinds.some(Boolean)) {
+      const legend = document.createElement('p'); legend.className = 'villa-capacity-legend';
+      if (capacityKinds.includes('confirmed-shortfall')) {
+        const confirmed = document.createElement('span'); confirmed.className = 'confirmed-shortfall'; confirmed.textContent = 'Confirmed shortfall'; legend.append(confirmed);
+      }
+      if (capacityKinds.includes('possible-shortfall')) {
+        const possible = document.createElement('span'); possible.className = 'possible-shortfall'; possible.textContent = 'Possible shortfall'; legend.append(possible);
+      }
+      wrap.append(intro, legend);
+    } else {
+      wrap.append(intro);
+    }
     const table = document.createElement('table'); table.className = 'villa-comparison';
     const head = document.createElement('thead');
     const headRow = document.createElement('tr');
@@ -371,6 +392,7 @@
     const body = document.createElement('tbody');
     comparable.forEach((proposal) => {
       const row = document.createElement('tr');
+      const capacityKind = stayCapacityKind(proposal);
       const cells = [
         proposal.title,
         formatMoney(proposal.total_price, proposal.currency) || '—',
@@ -379,10 +401,19 @@
         proposal.location || '—',
         `${proposal.booking_count} interested`,
       ];
-      cells.forEach((value) => { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); });
+      cells.forEach((value, index) => {
+        const cell = document.createElement('td'); cell.textContent = value;
+        if (index === 3 && capacityKind) {
+          cell.className = `villa-capacity-cell ${capacityKind}`;
+          cell.title = capacityKind === 'confirmed-shortfall'
+            ? 'Too small for confirmed guests in the top date range.'
+            : 'May be too small when Maybe guests join the top date range.';
+        }
+        row.append(cell);
+      });
       body.append(row);
     });
-    table.append(body); wrap.append(intro, table); return wrap;
+    table.append(body); wrap.append(table); return wrap;
   }
 
   function proposalCard(proposal) {
@@ -397,16 +428,6 @@
       if (proposal.sleeps) details.push(`Sleeps ${proposal.sleeps}`);
       if (proposal.bedrooms) details.push(`${proposal.bedrooms} bedroom${proposal.bedrooms === 1 ? '' : 's'}`);
       if (details.length) { const detail = document.createElement('p'); detail.className = 'villa-details'; detail.textContent = details.join(' · '); card.append(detail); }
-      const topWindow = results.windows[0];
-      if (proposal.sleeps && topWindow && proposal.sleeps < topWindow.maximum_villa_capacity) {
-        const confirmedShortfall = proposal.sleeps < topWindow.maximum_confirmed_villa_capacity;
-        const warning = document.createElement('p');
-        warning.className = `villa-capacity-warning ${confirmedShortfall ? 'confirmed-shortfall' : 'possible-shortfall'}`;
-        warning.textContent = confirmedShortfall
-          ? `Capacity: ${proposal.sleeps} sleeps · ${topWindow.maximum_confirmed_villa_capacity} confirmed guests`
-          : `Capacity: ${proposal.sleeps} sleeps · up to ${topWindow.maximum_villa_capacity} possible guests`;
-        card.append(warning);
-      }
       if (proposal.total_price !== null) {
         const cost = document.createElement('p'); cost.className = 'proposal-price';
         const perPerson = formatMoney(proposal.price_per_active_person, proposal.currency);
