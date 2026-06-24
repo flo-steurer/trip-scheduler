@@ -239,6 +239,7 @@ class ResultsTests(TestCase, TripFactoryMixin):
 
         self.assertEqual(window["minimum_villa_occupancy"], 3)
         self.assertEqual(window["maximum_villa_capacity"], 3)
+        self.assertEqual(window["maximum_confirmed_villa_capacity"], 2)
         self.assertEqual(window["average_villa_fill"], 100)
 
     def test_variable_durations_prefer_ideal_when_attendance_rates_tie(self):

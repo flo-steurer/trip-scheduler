@@ -397,6 +397,16 @@
       if (proposal.sleeps) details.push(`Sleeps ${proposal.sleeps}`);
       if (proposal.bedrooms) details.push(`${proposal.bedrooms} bedroom${proposal.bedrooms === 1 ? '' : 's'}`);
       if (details.length) { const detail = document.createElement('p'); detail.className = 'villa-details'; detail.textContent = details.join(' · '); card.append(detail); }
+      const topWindow = results.windows[0];
+      if (proposal.sleeps && topWindow && proposal.sleeps < topWindow.maximum_villa_capacity) {
+        const confirmedShortfall = proposal.sleeps < topWindow.maximum_confirmed_villa_capacity;
+        const warning = document.createElement('p');
+        warning.className = `villa-capacity-warning ${confirmedShortfall ? 'confirmed-shortfall' : 'possible-shortfall'}`;
+        warning.textContent = confirmedShortfall
+          ? `Capacity: ${proposal.sleeps} sleeps · ${topWindow.maximum_confirmed_villa_capacity} confirmed guests`
+          : `Capacity: ${proposal.sleeps} sleeps · up to ${topWindow.maximum_villa_capacity} possible guests`;
+        card.append(warning);
+      }
       if (proposal.total_price !== null) {
         const cost = document.createElement('p'); cost.className = 'proposal-price';
         const perPerson = formatMoney(proposal.price_per_active_person, proposal.currency);

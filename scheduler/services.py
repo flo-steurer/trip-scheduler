@@ -366,6 +366,7 @@ def trip_results(trip):
             confirmed, possible, partial, eligible_attendees, below_minimum = [], [], [], [], []
             available_person_days = 0
             maybe_person_days = 0
+            daily_confirmed_attendance = [0] * duration_days
             daily_potential_attendance = [0] * duration_days
             for participant in scoring_participants:
                 statuses = [status_by_person[participant.id].get(day, "unmarked") for day in window_days]
@@ -385,6 +386,8 @@ def trip_results(trip):
                 maybe_person_days += maybe_days
                 eligible_attendees.append(participant.name)
                 for day_index, status in enumerate(statuses):
+                    if status == Availability.Status.AVAILABLE:
+                        daily_confirmed_attendance[day_index] += 1
                     if status in (Availability.Status.AVAILABLE, Availability.Status.MAYBE):
                         daily_potential_attendance[day_index] += 1
                 if all(status == Availability.Status.AVAILABLE for status in statuses):
@@ -402,6 +405,7 @@ def trip_results(trip):
             attendance_rate_value = attendance_score / possible_score if possible_score else 0
             attendance_rate = round(attendance_rate_value * 100)
             maximum_villa_capacity = max(daily_potential_attendance, default=0)
+            maximum_confirmed_villa_capacity = max(daily_confirmed_attendance, default=0)
             minimum_villa_occupancy = min(daily_potential_attendance, default=0)
             average_villa_fill = round(
                 ((available_person_days + maybe_person_days) / (maximum_villa_capacity * duration_days)) * 100
@@ -424,6 +428,7 @@ def trip_results(trip):
                 "attendance_rate": attendance_rate,
                 "minimum_villa_occupancy": minimum_villa_occupancy,
                 "maximum_villa_capacity": maximum_villa_capacity,
+                "maximum_confirmed_villa_capacity": maximum_confirmed_villa_capacity,
                 "average_villa_fill": average_villa_fill,
                 "attendance_rate_value": attendance_rate_value,
             })
