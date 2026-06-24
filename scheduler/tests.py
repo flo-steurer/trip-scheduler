@@ -220,6 +220,27 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(windows[0]["average_villa_fill"], 89)
         self.assertEqual(windows[0]["partial"], [{"name": "Alex", "available_days": 4, "maybe_days": 0}])
 
+    def test_villa_capacity_counts_maybe_statuses_as_potential_guests(self):
+        trip = self.make_trip(end_date=date(2026, 7, 2))
+        self.person(trip, "Ari", {
+            date(2026, 7, 1): "available",
+            date(2026, 7, 2): "available",
+        })
+        self.person(trip, "Bea", {
+            date(2026, 7, 1): "maybe",
+            date(2026, 7, 2): "maybe",
+        })
+        self.person(trip, "Cam", {
+            date(2026, 7, 1): "available",
+            date(2026, 7, 2): "maybe",
+        })
+
+        window = trip_results(trip)["windows"][0]
+
+        self.assertEqual(window["minimum_villa_occupancy"], 3)
+        self.assertEqual(window["maximum_villa_capacity"], 3)
+        self.assertEqual(window["average_villa_fill"], 100)
+
     def test_variable_durations_prefer_ideal_when_attendance_rates_tie(self):
         trip = self.make_trip(
             end_date=date(2026, 7, 5),

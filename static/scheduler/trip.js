@@ -270,8 +270,8 @@
       const scores = document.createElement('div'); scores.className = 'window-scores';
       scores.append(badge('attendance', `${window.attendance_rate}%`, 'available'));
       const villaRange = window.minimum_villa_occupancy === window.maximum_villa_capacity
-        ? `${window.maximum_villa_capacity} guests/day`
-        : `${window.minimum_villa_occupancy}–${window.maximum_villa_capacity} guests/day`;
+        ? `${window.maximum_villa_capacity} possible guests/day`
+        : `${window.minimum_villa_occupancy}–${window.maximum_villa_capacity} possible guests/day`;
       scores.append(metricBadge(villaRange, 'villa'));
       scores.append(metricBadge(`${window.average_villa_fill}% filled`, 'villa'));
       details.append(title, scores);

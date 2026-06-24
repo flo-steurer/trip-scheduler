@@ -366,7 +366,7 @@ def trip_results(trip):
             confirmed, possible, partial, eligible_attendees, below_minimum = [], [], [], [], []
             available_person_days = 0
             maybe_person_days = 0
-            daily_confirmed_attendance = [0] * duration_days
+            daily_potential_attendance = [0] * duration_days
             for participant in scoring_participants:
                 statuses = [status_by_person[participant.id].get(day, "unmarked") for day in window_days]
                 available_days = statuses.count(Availability.Status.AVAILABLE)
@@ -385,8 +385,8 @@ def trip_results(trip):
                 maybe_person_days += maybe_days
                 eligible_attendees.append(participant.name)
                 for day_index, status in enumerate(statuses):
-                    if status == Availability.Status.AVAILABLE:
-                        daily_confirmed_attendance[day_index] += 1
+                    if status in (Availability.Status.AVAILABLE, Availability.Status.MAYBE):
+                        daily_potential_attendance[day_index] += 1
                 if all(status == Availability.Status.AVAILABLE for status in statuses):
                     confirmed.append(participant.name)
                 elif all(status in (Availability.Status.AVAILABLE, Availability.Status.MAYBE) for status in statuses):
@@ -401,10 +401,10 @@ def trip_results(trip):
             possible_score = len(scoring_participants) * duration_days * 2
             attendance_rate_value = attendance_score / possible_score if possible_score else 0
             attendance_rate = round(attendance_rate_value * 100)
-            maximum_villa_capacity = max(daily_confirmed_attendance, default=0)
-            minimum_villa_occupancy = min(daily_confirmed_attendance, default=0)
+            maximum_villa_capacity = max(daily_potential_attendance, default=0)
+            minimum_villa_occupancy = min(daily_potential_attendance, default=0)
             average_villa_fill = round(
-                (available_person_days / (maximum_villa_capacity * duration_days)) * 100
+                ((available_person_days + maybe_person_days) / (maximum_villa_capacity * duration_days)) * 100
             ) if maximum_villa_capacity else 0
             windows.append({
                 "start_date": window_days[0].isoformat(),
