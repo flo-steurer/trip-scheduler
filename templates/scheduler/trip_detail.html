@@ -71,13 +71,22 @@
     </summary>
     <div class="collapsible-content">
       <span id="proposal-state" class="save-state" aria-live="polite"></span>
-      <p class="help">Add a destination, villa, or any other idea. Everyone can support as many proposals as they like.</p>
+      <p class="help">Add a destination, villa, or any other idea. For villas, add the optional details to compare cost, capacity, and booking interest.</p>
       <div class="leaderboard-links"><a class="karma-link" href="{% url 'leaderboard' trip.public_id %}">Check the Beer Karma leaderboard <span aria-hidden="true">→</span></a><a class="karma-link" href="{% url 'chip_leaderboard' trip.public_id %}">Check the Chip leaderboard <span aria-hidden="true">→</span></a></div>
       <form id="proposal-form" class="proposal-form">
-        <label>Type<select id="proposal-type" required><option value="destination">Destination</option><option value="stay">Villa / stay</option><option value="other">Other idea</option></select></label>
-        <label class="proposal-title-field">Title<input id="proposal-title" maxlength="160" required placeholder="e.g. Villa overlooking Lake Garda"></label>
-        <label>Price <span class="optional">optional</span><input id="proposal-price" maxlength="100" placeholder="e.g. €3,200 / week"></label>
+        <label>Idea type<select id="proposal-type" required><option value="destination">Destination</option><option value="stay">Villa / stay</option><option value="other">Other idea</option></select></label>
+        <p id="proposal-type-hint" class="proposal-type-hint" aria-live="polite"></p>
+        <label class="proposal-title-field">Title<input id="proposal-title" maxlength="160" required placeholder="e.g. Istrian coast"></label>
+        <label id="proposal-price-field" hidden>Villa price note <span class="optional">optional</span><input id="proposal-price" maxlength="100" placeholder="e.g. €3,200 / week"></label>
         <label class="proposal-link-field">Link <span class="optional">optional</span><input id="proposal-url" type="url" maxlength="500" placeholder="https://…"></label>
+        <div id="stay-details" class="stay-details" hidden>
+          <label>Total price <span class="optional">optional</span><input id="proposal-total-price" type="number" min="0" step="0.01" placeholder="3200"></label>
+          <label>Currency <span class="optional">optional</span><input id="proposal-currency" maxlength="3" placeholder="EUR"></label>
+          <label>Bedrooms <span class="optional">optional</span><input id="proposal-bedrooms" type="number" min="1" step="1" placeholder="5"></label>
+          <label>Sleeps <span class="optional">optional</span><input id="proposal-sleeps" type="number" min="1" step="1" placeholder="12"></label>
+          <label class="stay-location-field">Location <span class="optional">optional</span><input id="proposal-location" maxlength="120" placeholder="e.g. South Istria"></label>
+          <label class="stay-cancellation-field">Cancellation <span class="optional">optional</span><input id="proposal-cancellation-terms" maxlength="240" placeholder="e.g. Free cancellation until 1 July"></label>
+        </div>
         <label class="proposal-note-field">Note <span class="optional">optional</span><textarea id="proposal-note" maxlength="1000" rows="2" placeholder="Why this one is worth a look"></textarea></label>
         <div class="proposal-form-actions"><button id="proposal-submit" class="button" type="submit">Add idea <span>+</span></button><button id="proposal-cancel" class="text-button" type="button" hidden>Cancel</button></div>
       </form>

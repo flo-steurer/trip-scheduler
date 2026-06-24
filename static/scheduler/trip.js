@@ -14,6 +14,11 @@
   const proposalSummary = document.querySelector('#proposal-summary');
   const proposalSubmit = document.querySelector('#proposal-submit');
   const proposalCancel = document.querySelector('#proposal-cancel');
+  const proposalType = document.querySelector('#proposal-type');
+  const stayDetails = document.querySelector('#stay-details');
+  const proposalTypeHint = document.querySelector('#proposal-type-hint');
+  const proposalPriceField = document.querySelector('#proposal-price-field');
+  const proposalTitle = document.querySelector('#proposal-title');
   const storageKey = `trip-scheduler:${app.dataset.tripId}:name`;
   let results = initialResults;
   let submitting = false;
@@ -29,6 +34,15 @@
   const formatChips = (millis) => {
     const chips = (millis ?? 0) / 1000;
     return Number.isInteger(chips) ? String(chips) : chips.toFixed(3).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  };
+  const formatMoney = (amount, currency) => {
+    if (amount === null || amount === undefined || amount === '') return '';
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: currency ? 'currency' : 'decimal', currency: currency || undefined,
+        maximumFractionDigits: 2,
+      }).format(Number(amount));
+    } catch (_) { return `${amount}${currency ? ` ${currency}` : ''}`; }
   };
   const statusFor = (date) => ownParticipant()?.availability[date] || 'unmarked';
   const monthName = (date) => date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
@@ -336,10 +350,39 @@
       if (!proposals.length) return;
       const group = document.createElement('section'); group.className = 'proposal-group';
       const heading = document.createElement('h3'); heading.textContent = label; group.append(heading);
+      if (type === 'stay') group.append(villaComparison(proposals));
       const cards = document.createElement('div'); cards.className = 'proposal-cards';
       proposals.forEach((proposal) => cards.append(proposalCard(proposal)));
       group.append(cards); board.append(group);
     });
+  }
+
+  function villaComparison(proposals) {
+    const comparable = proposals.filter((proposal) => proposal.total_price !== null || proposal.sleeps || proposal.bedrooms || proposal.location);
+    if (!comparable.length) return document.createDocumentFragment();
+    const wrap = document.createElement('div'); wrap.className = 'villa-comparison-wrap';
+    const intro = document.createElement('p'); intro.className = 'villa-comparison-note';
+    intro.textContent = `Comparison uses ${results.active_participant_count} active participant${results.active_participant_count === 1 ? '' : 's'} for per-person cost.`;
+    const table = document.createElement('table'); table.className = 'villa-comparison';
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    ['Villa', 'Total', 'Per person', 'Beds', 'Location', 'Would book'].forEach((label) => { const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = label; headRow.append(cell); });
+    head.append(headRow); table.append(head);
+    const body = document.createElement('tbody');
+    comparable.forEach((proposal) => {
+      const row = document.createElement('tr');
+      const cells = [
+        proposal.title,
+        formatMoney(proposal.total_price, proposal.currency) || '—',
+        formatMoney(proposal.price_per_active_person, proposal.currency) || '—',
+        proposal.sleeps ? `${proposal.sleeps} sleeps${proposal.bedrooms ? ` · ${proposal.bedrooms} BR` : ''}` : (proposal.bedrooms ? `${proposal.bedrooms} BR` : '—'),
+        proposal.location || '—',
+        `${proposal.booking_count} interested`,
+      ];
+      cells.forEach((value) => { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); });
+      body.append(row);
+    });
+    table.append(body); wrap.append(intro, table); return wrap;
   }
 
   function proposalCard(proposal) {
@@ -348,6 +391,23 @@
     const title = document.createElement('h4'); title.textContent = proposal.title;
     const count = document.createElement('span'); count.className = 'proposal-vote-count'; count.textContent = `${proposal.vote_count} upvote${proposal.vote_count === 1 ? '' : 's'}`;
     top.append(title, count); card.append(top);
+    if (proposal.type === 'stay') {
+      const details = [];
+      if (proposal.location) details.push(proposal.location);
+      if (proposal.sleeps) details.push(`Sleeps ${proposal.sleeps}`);
+      if (proposal.bedrooms) details.push(`${proposal.bedrooms} bedroom${proposal.bedrooms === 1 ? '' : 's'}`);
+      if (details.length) { const detail = document.createElement('p'); detail.className = 'villa-details'; detail.textContent = details.join(' · '); card.append(detail); }
+      if (proposal.total_price !== null) {
+        const cost = document.createElement('p'); cost.className = 'proposal-price';
+        const perPerson = formatMoney(proposal.price_per_active_person, proposal.currency);
+        cost.textContent = `${formatMoney(proposal.total_price, proposal.currency)} total${perPerson ? ` · ${perPerson} per active person` : ''}`;
+        card.append(cost);
+      }
+      if (proposal.cancellation_terms) { const cancellation = document.createElement('p'); cancellation.className = 'villa-cancellation'; cancellation.textContent = `Cancellation: ${proposal.cancellation_terms}`; card.append(cancellation); }
+      const interest = document.createElement('p'); interest.className = 'booking-interest-summary';
+      const interested = proposal.booking_names.length ? proposal.booking_names.join(', ') : 'No one yet';
+      interest.textContent = `Interested (non-binding): ${interested}`; card.append(interest);
+    }
     if (proposal.price) { const price = document.createElement('p'); price.className = 'proposal-price'; price.textContent = proposal.price; card.append(price); }
     if (proposal.note) { const note = document.createElement('p'); note.className = 'proposal-note'; note.textContent = proposal.note; card.append(note); }
     if (proposal.url) {
@@ -358,9 +418,19 @@
     meta.textContent = `Added by ${proposal.submitted_by} · ${supporters}`; card.append(meta);
     const actions = document.createElement('div'); actions.className = 'proposal-actions';
     const vote = document.createElement('button'); vote.className = `upvote-button${hasUpvoted(proposal) ? ' voted' : ''}`; vote.type = 'button'; vote.textContent = hasUpvoted(proposal) ? 'Remove upvote' : 'Upvote'; vote.addEventListener('click', () => toggleVote(proposal));
+    actions.append(vote);
+    if (proposal.type === 'stay') {
+      const booking = document.createElement('button'); const hasInterest = hasBookingInterest(proposal);
+      booking.className = `booking-button${hasInterest ? ' interested' : ''}`; booking.type = 'button';
+      booking.textContent = hasInterest ? 'Interested ✓' : 'I’m interested';
+      booking.title = hasInterest ? 'Remove your non-binding interest' : 'Mark that you are interested in this stay';
+      booking.setAttribute('aria-pressed', String(hasInterest));
+      booking.addEventListener('click', () => toggleBookingInterest(proposal)); actions.append(booking);
+    }
+    const secondaryActions = document.createElement('div'); secondaryActions.className = 'proposal-secondary-actions';
     const edit = document.createElement('button'); edit.className = 'text-button'; edit.type = 'button'; edit.textContent = 'Edit'; edit.addEventListener('click', () => beginEdit(proposal));
     const remove = document.createElement('button'); remove.className = 'text-button danger'; remove.type = 'button'; remove.textContent = 'Delete'; remove.addEventListener('click', () => deleteProposal(proposal));
-    actions.append(vote, edit, remove); card.append(actions);
+    secondaryActions.append(edit, remove); actions.append(secondaryActions); card.append(actions);
     return card;
   }
 
@@ -372,12 +442,19 @@
       price: document.querySelector('#proposal-price').value,
       url: document.querySelector('#proposal-url').value,
       note: document.querySelector('#proposal-note').value,
+      total_price: document.querySelector('#proposal-total-price').value,
+      currency: document.querySelector('#proposal-currency').value,
+      location: document.querySelector('#proposal-location').value,
+      bedrooms: document.querySelector('#proposal-bedrooms').value,
+      sleeps: document.querySelector('#proposal-sleeps').value,
+      cancellation_terms: document.querySelector('#proposal-cancellation-terms').value,
     };
   }
 
   function resetProposalForm() {
     editingProposalId = null;
     proposalForm.reset();
+    updateStayDetails();
     proposalSubmit.innerHTML = 'Add idea <span>+</span>';
     proposalCancel.hidden = true;
   }
@@ -388,6 +465,13 @@
     document.querySelector('#proposal-price').value = proposal.price;
     document.querySelector('#proposal-url').value = proposal.url;
     document.querySelector('#proposal-note').value = proposal.note;
+    document.querySelector('#proposal-total-price').value = proposal.total_price ?? '';
+    document.querySelector('#proposal-currency').value = proposal.currency;
+    document.querySelector('#proposal-location').value = proposal.location;
+    document.querySelector('#proposal-bedrooms').value = proposal.bedrooms ?? '';
+    document.querySelector('#proposal-sleeps').value = proposal.sleeps ?? '';
+    document.querySelector('#proposal-cancellation-terms').value = proposal.cancellation_terms;
+    updateStayDetails();
     editingProposalId = proposal.id;
     proposalSubmit.textContent = 'Save changes';
     proposalCancel.hidden = false;
@@ -416,6 +500,44 @@
       results = data.results; renderResults(); setProposalState('Saved');
     } catch (error) { setProposalState(error.message, true); }
     finally { submitting = false; }
+  }
+
+  function hasBookingInterest(proposal) {
+    const name = currentName().toLocaleLowerCase();
+    return Boolean(name) && proposal.booking_names.some((person) => person.toLocaleLowerCase() === name);
+  }
+
+  async function toggleBookingInterest(proposal) {
+    if (!currentName()) { setProposalState('Save your name before marking a stay.', true); nameInput.focus(); return; }
+    if (submitting) return;
+    submitting = true; setProposalState('Saving…');
+    try {
+      const data = await request(`${proposalUrl(proposal.id)}booking-interest/`, { name: currentName() });
+      results = data.results; renderResults(); setProposalState('Saved');
+    } catch (error) { setProposalState(error.message, true); }
+    finally { submitting = false; }
+  }
+
+  function updateStayDetails() {
+    const isStay = proposalType.value === 'stay';
+    stayDetails.hidden = !isStay;
+    proposalPriceField.hidden = !isStay;
+    const copy = {
+      destination: {
+        hint: 'Suggest a place or region for the trip. Add a link and why it is a good fit.',
+        placeholder: 'e.g. Istrian coast',
+      },
+      stay: {
+        hint: 'Compare villas by total cost, beds, location, cancellation terms, and who would book.',
+        placeholder: 'e.g. Villa overlooking Lake Garda',
+      },
+      other: {
+        hint: 'Add anything that helps the group decide or organise the trip.',
+        placeholder: 'e.g. Ask Luca about his boat',
+      },
+    }[proposalType.value];
+    proposalTypeHint.textContent = copy.hint;
+    proposalTitle.placeholder = copy.placeholder;
   }
 
   async function deleteProposal(proposal) {
@@ -521,6 +643,8 @@
   document.addEventListener('pointercancel', (event) => finishRangeGesture(event, true));
   proposalForm.addEventListener('submit', submitProposal);
   proposalCancel.addEventListener('click', resetProposalForm);
+  proposalType.addEventListener('change', updateStayDetails);
+  updateStayDetails();
   document.querySelector('#copy-link').addEventListener('click', async (event) => {
     const input = document.querySelector('#share-url');
     try { await navigator.clipboard.writeText(input.value); event.currentTarget.textContent = 'Copied'; }

@@ -236,7 +236,9 @@ def trip_results(trip):
         window.pop("attendance_rate_value", None)
 
     proposals = list(
-        trip.proposals.select_related("submitted_by").prefetch_related("votes__participant")
+        trip.proposals.select_related("submitted_by").prefetch_related(
+            "votes__participant", "booking_interests__participant"
+        )
     )
     karma_by_participant = {
         participant.id: {"post_count": 0, "upvote_count": 0}
@@ -249,6 +251,12 @@ def trip_results(trip):
         for vote in votes:
             karma_by_participant[proposal.submitted_by_id]["upvote_count"] += 1
         voter_names = sorted(vote.participant.name for vote in votes)
+        booking_names = sorted(interest.participant.name for interest in proposal.booking_interests.all())
+        price_per_active_person = (
+            proposal.total_price / len(scoring_participants)
+            if proposal.total_price is not None and scoring_participants
+            else None
+        )
         proposal_results.append({
             "id": proposal.id,
             "type": proposal.type,
@@ -257,9 +265,18 @@ def trip_results(trip):
             "url": proposal.url,
             "note": proposal.note,
             "price": proposal.price,
+            "total_price": proposal.total_price,
+            "currency": proposal.currency,
+            "location": proposal.location,
+            "bedrooms": proposal.bedrooms,
+            "sleeps": proposal.sleeps,
+            "cancellation_terms": proposal.cancellation_terms,
+            "price_per_active_person": price_per_active_person,
             "submitted_by": proposal.submitted_by.name,
             "voter_names": voter_names,
             "vote_count": len(voter_names),
+            "booking_names": booking_names,
+            "booking_count": len(booking_names),
             "created_at": proposal.created_at.isoformat(),
             "created_at_timestamp": proposal.created_at.timestamp(),
         })

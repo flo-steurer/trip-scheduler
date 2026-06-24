@@ -16,5 +16,6 @@ urlpatterns = [
     path("trips/<uuid:public_id>/api/proposals/", views.proposal_collection_api, name="proposal_collection_api"),
     path("trips/<uuid:public_id>/api/proposals/<int:proposal_id>/", views.proposal_detail_api, name="proposal_detail_api"),
     path("trips/<uuid:public_id>/api/proposals/<int:proposal_id>/vote/", views.proposal_vote_api, name="proposal_vote_api"),
+    path("trips/<uuid:public_id>/api/proposals/<int:proposal_id>/booking-interest/", views.proposal_booking_interest_api, name="proposal_booking_interest_api"),
     path("trips/<uuid:public_id>/api/markets/<int:market_id>/trade/", views.market_trade_api, name="market_trade_api"),
 ]

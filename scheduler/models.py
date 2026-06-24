@@ -160,6 +160,12 @@ class Proposal(models.Model):
     url = models.URLField(blank=True, max_length=500)
     note = models.TextField(blank=True, max_length=1000)
     price = models.CharField(blank=True, max_length=100)
+    total_price = models.DecimalField(blank=True, decimal_places=2, max_digits=10, null=True)
+    currency = models.CharField(blank=True, max_length=3)
+    location = models.CharField(blank=True, max_length=120)
+    bedrooms = models.PositiveSmallIntegerField(blank=True, null=True)
+    sleeps = models.PositiveSmallIntegerField(blank=True, null=True)
+    cancellation_terms = models.CharField(blank=True, max_length=240)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -187,6 +193,29 @@ class ProposalVote(models.Model):
     def clean(self):
         if self.proposal_id and self.participant_id and self.proposal.trip_id != self.participant.trip_id:
             raise ValidationError({"participant": "Votes must come from a participant in the same trip."})
+
+
+class ProposalBookingInterest(models.Model):
+    """A participant's non-binding signal that they would book a stay."""
+
+    proposal = models.ForeignKey(Proposal, related_name="booking_interests", on_delete=models.CASCADE)
+    participant = models.ForeignKey(Participant, related_name="proposal_booking_interests", on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["proposal", "participant"],
+                name="unique_proposal_booking_interest_per_participant",
+            ),
+        ]
+
+    def clean(self):
+        if self.proposal_id and self.participant_id:
+            if self.proposal.type != Proposal.Type.STAY:
+                raise ValidationError({"proposal": "Only stays can receive booking interest."})
+            if self.proposal.trip_id != self.participant.trip_id:
+                raise ValidationError({"participant": "Booking interest must come from the same trip."})
 
 
 class Market(models.Model):

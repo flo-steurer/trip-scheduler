@@ -8,7 +8,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.contrib.staticfiles import finders
 
-from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
+from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
 from .services import chip_holdings_history, chip_leaderboard, grant_daily_beercoins, idea_leaderboard, trip_results
 
 
@@ -530,6 +530,36 @@ class ProposalApiTests(TestCase, TripFactoryMixin):
         second = self.request_json("POST", vote_url, {"name": "Maya"})
         self.assertEqual(second.status_code, 200)
         self.assertEqual(ProposalVote.objects.count(), 0)
+
+    def test_stay_details_and_booking_interest_are_optional_and_preserve_legacy_price(self):
+        self.person(self.trip, "Maya", {date(2026, 7, 1): Availability.Status.AVAILABLE})
+        response = self.create_proposal(
+            price="€3,200 / week",
+            total_price="3200.00",
+            currency="eur",
+            location="South Istria",
+            bedrooms=5,
+            sleeps=11,
+            cancellation_terms="Free cancellation until 1 July",
+        )
+        self.assertEqual(response.status_code, 200)
+        proposal = Proposal.objects.get()
+        self.assertEqual(str(proposal.total_price), "3200.00")
+        self.assertEqual(proposal.currency, "EUR")
+        self.assertEqual(proposal.price, "€3,200 / week")
+        result = response.json()["results"]["proposals"][0]
+        self.assertEqual(result["price_per_active_person"], "3200.00")
+        self.assertEqual(result["booking_count"], 0)
+
+        booking_url = reverse("proposal_booking_interest_api", args=[self.trip.public_id, proposal.id])
+        booked = self.request_json("POST", booking_url, {"name": "Maya"})
+        self.assertEqual(booked.status_code, 200)
+        self.assertEqual(ProposalBookingInterest.objects.count(), 1)
+        self.assertEqual(booked.json()["results"]["proposals"][0]["booking_names"], ["Maya"])
+
+        unbooked = self.request_json("POST", booking_url, {"name": "Maya"})
+        self.assertEqual(unbooked.status_code, 200)
+        self.assertEqual(ProposalBookingInterest.objects.count(), 0)
 
     def test_edit_and_delete_require_a_name(self):
         self.create_proposal()

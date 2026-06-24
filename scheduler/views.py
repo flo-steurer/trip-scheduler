@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import TripForm
-from .models import Availability, ChipBalanceEvent, Market, MarketTrade, Participant, Proposal, ProposalVote, Trip
+from .models import Availability, ChipBalanceEvent, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
 from .services import chip_holdings_history, chip_leaderboard, idea_leaderboard, trip_results
 from world_cup.models import WorldCupMarket
 from world_cup.services import materialize_world_cup_markets_for_trip
@@ -99,6 +99,9 @@ def _proposal_fields(body, existing=None):
         "url": existing.url if existing else "",
         "note": existing.note if existing else "",
         "price": existing.price if existing else "",
+        "currency": existing.currency if existing else "",
+        "location": existing.location if existing else "",
+        "cancellation_terms": existing.cancellation_terms if existing else "",
     }
     for field in values:
         if field in body:
@@ -106,14 +109,33 @@ def _proposal_fields(body, existing=None):
                 return None, f"{field.title()} must be text."
             values[field] = body[field].strip()
 
+    for field in ("total_price", "bedrooms", "sleeps"):
+        value = body.get(field, getattr(existing, field) if existing else None)
+        if value in (None, ""):
+            values[field] = None
+            continue
+        try:
+            values[field] = Decimal(str(value)) if field == "total_price" else int(value)
+        except (InvalidOperation, TypeError, ValueError):
+            return None, f"{field.replace('_', ' ').title()} must be a number."
+
     if values["type"] not in Proposal.Type.values:
         return None, "Choose a valid proposal type."
     if not values["title"]:
         return None, "Enter a proposal title."
     if len(values["title"]) > 160:
         return None, "Titles must be 160 characters or fewer."
-    if len(values["url"]) > 500 or len(values["note"]) > 1000 or len(values["price"]) > 100:
+    if len(values["url"]) > 500 or len(values["note"]) > 1000 or len(values["price"]) > 100 or len(values["location"]) > 120 or len(values["cancellation_terms"]) > 240:
         return None, "One of the proposal fields is too long."
+    if values["currency"] and (len(values["currency"]) != 3 or not values["currency"].isalpha()):
+        return None, "Currency must be a three-letter code."
+    values["currency"] = values["currency"].upper()
+    if values["total_price"] is not None and values["total_price"] < 0:
+        return None, "Total price cannot be negative."
+    if values["bedrooms"] is not None and values["bedrooms"] < 1:
+        return None, "Bedrooms must be at least 1."
+    if values["sleeps"] is not None and values["sleeps"] < 1:
+        return None, "Sleeps must be at least 1."
     if values["url"]:
         try:
             URLValidator(schemes=["http", "https"])(values["url"])
@@ -331,6 +353,29 @@ def proposal_vote_api(request, public_id, proposal_id):
     else:
         ProposalVote.objects.create(proposal=proposal, participant=participant)
         action = "proposal_upvoted"
+    _activity(request, participant, action)
+    return _results_response(trip, participant=_participant_payload(participant))
+
+
+@require_POST
+def proposal_booking_interest_api(request, public_id, proposal_id):
+    trip = _trip(public_id)
+    proposal = get_object_or_404(Proposal, trip=trip, pk=proposal_id)
+    if proposal.type != Proposal.Type.STAY:
+        return JsonResponse({"error": "Only stays can receive booking interest."}, status=400)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    interest = ProposalBookingInterest.objects.filter(proposal=proposal, participant=participant).first()
+    if interest:
+        interest.delete()
+        action = "proposal_booking_interest_removed"
+    else:
+        ProposalBookingInterest.objects.create(proposal=proposal, participant=participant)
+        action = "proposal_booking_interest_added"
     _activity(request, participant, action)
     return _results_response(trip, participant=_participant_payload(participant))
 
