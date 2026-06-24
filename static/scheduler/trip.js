@@ -417,7 +417,7 @@
     const supporters = proposal.voter_names.length ? `Supported by ${proposal.voter_names.join(', ')}` : 'No upvotes yet';
     meta.textContent = `Added by ${proposal.submitted_by} · ${supporters}`; card.append(meta);
     const actions = document.createElement('div'); actions.className = 'proposal-actions';
-    const vote = document.createElement('button'); vote.className = `upvote-button${hasUpvoted(proposal) ? ' voted' : ''}`; vote.type = 'button'; vote.textContent = hasUpvoted(proposal) ? 'Remove upvote' : 'Upvote'; vote.addEventListener('click', () => toggleVote(proposal));
+    const vote = document.createElement('button'); const voted = hasUpvoted(proposal); vote.className = `upvote-button${voted ? ' voted' : ''}`; vote.type = 'button'; vote.textContent = voted ? 'Upvoted ✓' : 'Upvote'; vote.title = voted ? 'Remove your upvote' : 'Upvote this idea'; vote.setAttribute('aria-pressed', String(voted)); vote.addEventListener('click', () => toggleVote(proposal));
     actions.append(vote);
     if (proposal.type === 'stay') {
       const booking = document.createElement('button'); const hasInterest = hasBookingInterest(proposal);

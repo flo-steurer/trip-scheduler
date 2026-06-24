@@ -561,6 +561,26 @@ class ProposalApiTests(TestCase, TripFactoryMixin):
         self.assertEqual(unbooked.status_code, 200)
         self.assertEqual(ProposalBookingInterest.objects.count(), 0)
 
+    def test_backfill_villa_prices_previews_then_updates_only_unambiguous_eur_prices(self):
+        legacy = Proposal.objects.create(
+            trip=self.trip, submitted_by=self.person(self.trip, "Flo"), type="stay", title="Legacy", price="2774€/Woche"
+        )
+        already_structured = Proposal.objects.create(
+            trip=self.trip, submitted_by=legacy.submitted_by, type="stay", title="Structured", price="€3,200 / week", total_price="3000"
+        )
+        output = StringIO()
+        call_command("backfill_villa_prices", stdout=output)
+        legacy.refresh_from_db()
+        self.assertIsNone(legacy.total_price)
+        self.assertIn("Would update", output.getvalue())
+
+        call_command("backfill_villa_prices", "--apply", stdout=StringIO())
+        legacy.refresh_from_db()
+        already_structured.refresh_from_db()
+        self.assertEqual(str(legacy.total_price), "2774.00")
+        self.assertEqual(legacy.currency, "EUR")
+        self.assertEqual(str(already_structured.total_price), "3000.00")
+
     def test_edit_and_delete_require_a_name(self):
         self.create_proposal()
         proposal = Proposal.objects.get()
