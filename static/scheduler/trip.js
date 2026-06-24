@@ -19,6 +19,9 @@
   const proposalTypeHint = document.querySelector('#proposal-type-hint');
   const proposalPriceField = document.querySelector('#proposal-price-field');
   const proposalTitle = document.querySelector('#proposal-title');
+  const maybeAttendanceToggle = document.querySelector('#maybe-attendance-toggle');
+  const maybeAttendanceLabel = document.querySelector('#maybe-attendance-label');
+  const bestDatesHelp = document.querySelector('#best-dates-help');
   const storageKey = `trip-scheduler:${app.dataset.tripId}:name`;
   let results = initialResults;
   let submitting = false;
@@ -254,10 +257,90 @@
     return line;
   }
 
+  function alternateMaybeWindows() {
+    const participants = results.participants.filter((person) => person.is_active);
+    const start = localDate(app.dataset.startDate);
+    const end = localDate(app.dataset.endDate);
+    const days = [];
+    for (const day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) days.push(isoDate(day));
+    const windows = [];
+    const minimumDuration = Number(app.dataset.minimumDuration);
+    const maximumDuration = Number(app.dataset.maximumDuration);
+    const idealDuration = Number(app.dataset.idealDuration);
+
+    for (let durationDays = minimumDuration; durationDays <= maximumDuration; durationDays += 1) {
+      for (let offset = 0; offset <= days.length - durationDays; offset += 1) {
+        const windowDays = days.slice(offset, offset + durationDays);
+        const confirmed = [], possible = [], partial = [], eligibleAttendees = [], belowMinimum = [];
+        let availablePersonDays = 0;
+        let maybePersonDays = 0;
+        const dailyConfirmedAttendance = Array(durationDays).fill(0);
+        const dailyPotentialAttendance = Array(durationDays).fill(0);
+
+        participants.forEach((person) => {
+          const statuses = windowDays.map((day) => person.availability[day] || 'unmarked');
+          const availableDays = statuses.filter((status) => status === 'available').length;
+          const maybeDays = statuses.filter((status) => status === 'maybe').length;
+          if (availableDays + maybeDays < person.minimum_attendance_days) {
+            belowMinimum.push({ name: person.name, available_days: availableDays, maybe_days: maybeDays, minimum_days: person.minimum_attendance_days });
+            return;
+          }
+          availablePersonDays += availableDays;
+          maybePersonDays += maybeDays;
+          eligibleAttendees.push(person.name);
+          statuses.forEach((status, dayIndex) => {
+            if (status === 'available') dailyConfirmedAttendance[dayIndex] += 1;
+            if (status === 'available' || status === 'maybe') dailyPotentialAttendance[dayIndex] += 1;
+          });
+          if (statuses.every((status) => status === 'available')) confirmed.push(person.name);
+          else if (statuses.every((status) => status === 'available' || status === 'maybe')) possible.push(person.name);
+          else if (availableDays || maybeDays) partial.push({ name: person.name, available_days: availableDays, maybe_days: maybeDays });
+        });
+
+        const attendanceRateValue = participants.length
+          ? (availablePersonDays + maybePersonDays) / (participants.length * durationDays)
+          : 0;
+        const maximumVillaCapacity = Math.max(0, ...dailyPotentialAttendance);
+        windows.push({
+          start_date: windowDays[0], end_date: windowDays.at(-1), duration_days: durationDays,
+          confirmed, possible, partial, eligible_attendees: eligibleAttendees, below_minimum: belowMinimum,
+          confirmed_count: confirmed.length, possible_count: possible.length,
+          eligible_attendee_count: eligibleAttendees.length, available_person_days: availablePersonDays,
+          maybe_person_days: maybePersonDays, attendance_rate: Math.round(attendanceRateValue * 100),
+          minimum_villa_occupancy: Math.min(...dailyPotentialAttendance), maximum_villa_capacity: maximumVillaCapacity,
+          maximum_confirmed_villa_capacity: Math.max(0, ...dailyConfirmedAttendance),
+          average_villa_fill: maximumVillaCapacity
+            ? Math.round(((availablePersonDays + maybePersonDays) / (maximumVillaCapacity * durationDays)) * 100)
+            : 0,
+          attendance_rate_value: attendanceRateValue,
+        });
+      }
+    }
+    return windows.sort((left, right) => (
+      right.attendance_rate_value - left.attendance_rate_value
+      || Math.abs(left.duration_days - idealDuration) - Math.abs(right.duration_days - idealDuration)
+      || right.eligible_attendee_count - left.eligible_attendee_count
+      || left.start_date.localeCompare(right.start_date)
+    ));
+  }
+
+  function displayedWindows() {
+    return maybeAttendanceToggle?.checked ? alternateMaybeWindows() : results.windows;
+  }
+
+  function renderMaybeAttendanceMode() {
+    const isFullAttendance = maybeAttendanceToggle?.checked;
+    maybeAttendanceLabel.textContent = isFullAttendance ? 'Maybes: 100%' : 'Maybes: 50%';
+    bestDatesHelp.textContent = isFullAttendance
+      ? `Across ${app.dataset.minimumDuration}–${app.dataset.maximumDuration} days, ranked by attendance rate. Client-side preview: a “maybe” counts as a full day; your ${app.dataset.idealDuration}-day ideal breaks ties.`
+      : `Across ${app.dataset.minimumDuration}–${app.dataset.maximumDuration} days, ranked by attendance rate. Villa fit shows confirmed eligible guests per day and average bed fill. A “maybe” counts as half a day; your ${app.dataset.idealDuration}-day ideal breaks ties.`;
+  }
+
   function renderResults() {
     const windows = document.querySelector('#best-windows');
     windows.replaceChildren();
-    const topWindows = results.windows.slice(0, 5);
+    renderMaybeAttendanceMode();
+    const topWindows = displayedWindows().slice(0, 5);
     if (!results.participants.length) {
       const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'Waiting for the first response.'; windows.append(empty);
     }
@@ -670,6 +753,7 @@
 
   document.querySelector('#save-name').addEventListener('click', saveName);
   nameInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); saveName(); } });
+  maybeAttendanceToggle?.addEventListener('change', renderResults);
   minimumAttendanceInput.addEventListener('input', () => { minimumAttendanceValue.textContent = minimumAttendanceLabel(minimumAttendanceInput.value); });
   minimumAttendanceInput.addEventListener('change', updateMinimumAttendance);
   document.addEventListener('pointermove', handleRangePointerMove, { passive: false });

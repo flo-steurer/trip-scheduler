@@ -52,8 +52,15 @@
 
     <aside class="card results-card" aria-labelledby="best-dates-title">
       <p class="eyebrow">Group overlap</p>
-      <h2 id="best-dates-title">Best dates</h2>
-      <p class="help">Across {{ trip.minimum_duration_days }}–{{ trip.maximum_duration_days }} days, ranked by attendance rate. Villa fit shows confirmed eligible guests per day and average bed fill. A “maybe” counts as half a day; your {{ trip.ideal_duration_days }}-day ideal breaks ties.</p>
+      <div class="best-dates-heading">
+        <h2 id="best-dates-title">Best dates</h2>
+        <label class="maybe-attendance-toggle" for="maybe-attendance-toggle">
+          <span id="maybe-attendance-label">Maybes: 50%</span>
+          <input id="maybe-attendance-toggle" type="checkbox" aria-label="Count maybe availability as full attendance">
+          <span class="toggle-track" aria-hidden="true"></span>
+        </label>
+      </div>
+      <p id="best-dates-help" class="help">Across {{ trip.minimum_duration_days }}–{{ trip.maximum_duration_days }} days, ranked by attendance rate. Villa fit shows confirmed eligible guests per day and average bed fill. A “maybe” counts as half a day; your {{ trip.ideal_duration_days }}-day ideal breaks ties.</p>
       <div id="best-windows" class="best-windows"></div>
     </aside>
   </div>
