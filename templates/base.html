@@ -16,6 +16,7 @@
       <nav class="trip-nav" aria-label="Trip navigation">
         <a class="trip-nav-link{% if request.resolver_match.url_name == 'trip_detail' %} active{% endif %}" href="{% url 'trip_detail' trip.public_id %}"{% if request.resolver_match.url_name == 'trip_detail' %} aria-current="page"{% endif %}>Calendar</a>
         <a class="trip-nav-link{% if request.resolver_match.url_name == 'beermarket' %} active{% endif %}" href="{% url 'beermarket' trip.public_id %}"{% if request.resolver_match.url_name == 'beermarket' %} aria-current="page"{% endif %}>Beermarket</a>
+        <a class="trip-nav-link{% if request.resolver_match.url_name == 'beer_clicker' %} active{% endif %}" href="{% url 'beer_clicker' trip.public_id %}"{% if request.resolver_match.url_name == 'beer_clicker' %} aria-current="page"{% endif %}>Beer-clicker</a>
         <a class="trip-nav-link{% if request.resolver_match.url_name == 'leaderboard' %} active{% endif %}" href="{% url 'leaderboard' trip.public_id %}"{% if request.resolver_match.url_name == 'leaderboard' %} aria-current="page"{% endif %}>Karma</a>
         <a class="trip-nav-link{% if request.resolver_match.url_name == 'chip_leaderboard' %} active{% endif %}" href="{% url 'chip_leaderboard' trip.public_id %}"{% if request.resolver_match.url_name == 'chip_leaderboard' %} aria-current="page"{% endif %}>Chips</a>
         <a class="trip-nav-link" href="{% url 'home' %}">New trip</a>

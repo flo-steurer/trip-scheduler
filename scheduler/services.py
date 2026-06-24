@@ -5,10 +5,23 @@ from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
-from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Market, Participant, Proposal
+from .models import (
+    Availability,
+    ChipBalanceEvent,
+    ClickerAccount,
+    ClickerDailyConversion,
+    DailyBeercoinGrant,
+    Market,
+    Participant,
+    Proposal,
+)
 
 
 DAILY_BEERCOIN_MILLIS = 10_000
+CLICKER_CLICK_REWARD = 1
+CLICKER_CLICK_COOLDOWN_SECONDS = 0.1
+CLICKER_UNITS_PER_BEER_CHIP = 100
+CLICKER_DAILY_CONVERSION_CAP_MILLIS = 5_000
 
 
 def date_range(start, end):
@@ -40,6 +53,94 @@ def grant_daily_beercoins(grant_date=None):
             )
         recipient_count = len(participants)
     return grant, recipient_count
+
+
+def _locked_clicker_account(participant):
+    """Return an account while its participant row is already locked by the caller."""
+    account, _created = ClickerAccount.objects.select_for_update().get_or_create(
+        participant=participant,
+    )
+    return account
+
+
+def clicker_status(participant, account=None, conversion_date=None):
+    """Return the account and the participant's UTC-day conversion allowance."""
+    conversion_date = conversion_date or timezone.localdate()
+    account = account or ClickerAccount.objects.filter(participant=participant).first()
+    balance = account.balance if account else 0
+    lifetime_earned = account.lifetime_earned if account else 0
+    conversion = ClickerDailyConversion.objects.filter(
+        participant=participant,
+        conversion_date=conversion_date,
+    ).first()
+    converted_millis = conversion.beer_chip_millis if conversion else 0
+    remaining_millis = max(CLICKER_DAILY_CONVERSION_CAP_MILLIS - converted_millis, 0)
+    available_millis = min(
+        balance // CLICKER_UNITS_PER_BEER_CHIP * 1000,
+        remaining_millis,
+    )
+    return {
+        "clicker_balance": balance,
+        "lifetime_earned": lifetime_earned,
+        "beer_chip_millis": participant.beer_chip_millis,
+        "conversion_rate_units": CLICKER_UNITS_PER_BEER_CHIP,
+        "daily_conversion_cap_millis": CLICKER_DAILY_CONVERSION_CAP_MILLIS,
+        "converted_today_millis": converted_millis,
+        "remaining_daily_conversion_millis": remaining_millis,
+        "available_conversion_millis": available_millis,
+    }
+
+
+def award_clicker_click(participant, now=None):
+    """Award one clicker unit only when the server-side cooldown has elapsed."""
+    now = now or timezone.now()
+    with transaction.atomic():
+        participant = Participant.objects.select_for_update().get(pk=participant.pk)
+        account = _locked_clicker_account(participant)
+        if account.last_clicked_at:
+            elapsed = (now - account.last_clicked_at).total_seconds()
+            if elapsed < CLICKER_CLICK_COOLDOWN_SECONDS:
+                return participant, account, max(CLICKER_CLICK_COOLDOWN_SECONDS - elapsed, 0)
+        account.balance += CLICKER_CLICK_REWARD
+        account.lifetime_earned += CLICKER_CLICK_REWARD
+        account.last_clicked_at = now
+        account.save(update_fields=["balance", "lifetime_earned", "last_clicked_at"])
+        return participant, account, None
+
+
+def convert_clicker_currency(participant, conversion_date=None):
+    """Atomically convert only the daily allowance; safe to retry after a response loss."""
+    conversion_date = conversion_date or timezone.localdate()
+    with transaction.atomic():
+        participant = Participant.objects.select_for_update().get(pk=participant.pk)
+        account = _locked_clicker_account(participant)
+        conversion, _created = ClickerDailyConversion.objects.select_for_update().get_or_create(
+            participant=participant,
+            conversion_date=conversion_date,
+        )
+        remaining_millis = max(
+            CLICKER_DAILY_CONVERSION_CAP_MILLIS - conversion.beer_chip_millis,
+            0,
+        )
+        max_units = remaining_millis // 1000 * CLICKER_UNITS_PER_BEER_CHIP
+        clicker_spent = min(account.balance, max_units)
+        clicker_spent -= clicker_spent % CLICKER_UNITS_PER_BEER_CHIP
+        beer_chip_millis = clicker_spent // CLICKER_UNITS_PER_BEER_CHIP * 1000
+        if beer_chip_millis:
+            account.balance -= clicker_spent
+            account.save(update_fields=["balance"])
+            conversion.clicker_spent += clicker_spent
+            conversion.beer_chip_millis += beer_chip_millis
+            conversion.save(update_fields=["clicker_spent", "beer_chip_millis", "updated_at"])
+            participant.beer_chip_millis += beer_chip_millis
+            participant.save(update_fields=["beer_chip_millis"])
+            ChipBalanceEvent.objects.create(
+                participant=participant,
+                amount_millis=beer_chip_millis,
+                balance_after_millis=participant.beer_chip_millis,
+                reason=ChipBalanceEvent.Reason.CLICKER_CONVERSION,
+            )
+        return participant, account, conversion, beer_chip_millis
 
 
 def idea_leaderboard(trip):
@@ -97,6 +198,29 @@ def chip_leaderboard(trip):
             else f"{whole_chips}.{fractional_millis:03d}".rstrip("0")
         )
         entry["rank"] = position
+    return entries
+
+
+def clicker_leaderboard(trip):
+    """Return participants ranked by clicker lifetime earnings, then balance."""
+    entries = []
+    for participant in trip.participants.select_related("clicker_account"):
+        try:
+            account = participant.clicker_account
+        except ClickerAccount.DoesNotExist:
+            account = None
+        entries.append({
+            "name": participant.name,
+            "clicker_balance": account.balance if account else 0,
+            "lifetime_earned": account.lifetime_earned if account else 0,
+        })
+    entries.sort(key=lambda entry: (
+        -entry["lifetime_earned"],
+        -entry["clicker_balance"],
+        entry["name"].casefold(),
+    ))
+    for rank, entry in enumerate(entries, start=1):
+        entry["rank"] = rank
     return entries
 
 

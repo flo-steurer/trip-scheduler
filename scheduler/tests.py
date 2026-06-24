@@ -1,15 +1,16 @@
 import json
 from io import StringIO
-from datetime import date
+from datetime import date, timedelta
 
 from django.core.management import call_command
 from django.test import TestCase
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from django.contrib.staticfiles import finders
 
-from .models import Availability, ChipBalanceEvent, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
-from .services import chip_holdings_history, chip_leaderboard, grant_daily_beercoins, idea_leaderboard, market_performance, trip_results
+from .models import Availability, ChipBalanceEvent, ClickerAccount, ClickerDailyConversion, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
+from .services import award_clicker_click, chip_holdings_history, chip_leaderboard, clicker_leaderboard, convert_clicker_currency, grant_daily_beercoins, idea_leaderboard, market_performance, trip_results
 
 
 class TripFactoryMixin:
@@ -44,6 +45,7 @@ class TripFormTests(TestCase):
         self.assertIsNotNone(finders.find("scheduler/app.css"))
         self.assertIsNotNone(finders.find("scheduler/trip.js"))
         self.assertIsNotNone(finders.find("scheduler/beermarket.js"))
+        self.assertIsNotNone(finders.find("scheduler/beer_clicker.js"))
         self.assertIsNotNone(finders.find("scheduler/chip_leaderboard.js"))
         self.assertIsNotNone(finders.find("scheduler/vendor/echarts.common.min.js"))
         self.assertIsNotNone(finders.find("scheduler/favicon.svg"))
@@ -108,8 +110,8 @@ class TripFormTests(TestCase):
             ideal_duration_days=4,
             maximum_duration_days=4,
         )
-        pages = ("trip_detail", "beermarket", "leaderboard", "chip_leaderboard")
-        navigation = ("trip_detail", "beermarket", "leaderboard", "chip_leaderboard", "home")
+        pages = ("trip_detail", "beermarket", "beer_clicker", "leaderboard", "chip_leaderboard")
+        navigation = ("trip_detail", "beermarket", "beer_clicker", "leaderboard", "chip_leaderboard", "home")
 
         for page in pages:
             response = self.client.get(reverse(page, args=[trip.public_id]))
@@ -459,6 +461,98 @@ class LeaderboardPageTests(TestCase, TripFactoryMixin):
         self.assertContains(response, 'src="/static/scheduler/chip_leaderboard.js"')
         self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
 
+
+class BeerClickerTests(TestCase, TripFactoryMixin):
+    def setUp(self):
+        self.trip = self.make_trip()
+        self.participant = self.person(self.trip, "Maya")
+        self.click_url = reverse("beer_clicker_click_api", args=[self.trip.public_id])
+        self.convert_url = reverse("beer_clicker_convert_api", args=[self.trip.public_id])
+
+    def post_json(self, url, data):
+        return self.client.post(url, data=json.dumps(data), content_type="application/json")
+
+    def test_click_is_server_authoritative_and_rate_limited(self):
+        invalid = self.post_json(self.click_url, {})
+        first = self.post_json(self.click_url, {"name": "Maya"})
+        repeated = self.post_json(self.click_url, {"name": "Maya"})
+
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["earned"], 1)
+        self.assertEqual(repeated.status_code, 429)
+        account = ClickerAccount.objects.get(participant=self.participant)
+        self.assertEqual((account.balance, account.lifetime_earned), (1, 1))
+        self.participant.refresh_from_db()
+        self.assertEqual(self.participant.beer_chip_millis, 10_000)
+        self.assertFalse(ChipBalanceEvent.objects.filter(reason=ChipBalanceEvent.Reason.CLICKER_CONVERSION).exists())
+
+    def test_click_service_rejects_rapid_click_without_changing_balances(self):
+        now = timezone.now()
+        _participant, first_account, first_retry = award_clicker_click(self.participant, now=now)
+        _participant, repeated_account, repeated_retry = award_clicker_click(self.participant, now=now + timedelta(milliseconds=50))
+
+        self.assertIsNone(first_retry)
+        self.assertIsNotNone(repeated_retry)
+        self.assertEqual(first_account.pk, repeated_account.pk)
+        repeated_account.refresh_from_db()
+        self.assertEqual((repeated_account.balance, repeated_account.lifetime_earned), (1, 1))
+
+    def test_conversion_enforces_daily_cap_and_is_idempotent_on_repeat(self):
+        ClickerAccount.objects.create(participant=self.participant, balance=600, lifetime_earned=600)
+        conversion_day = date(2026, 7, 1)
+
+        participant, account, conversion, credited = convert_clicker_currency(self.participant, conversion_day)
+        participant, account, repeated_conversion, repeated_credit = convert_clicker_currency(self.participant, conversion_day)
+
+        self.assertEqual(credited, 5_000)
+        self.assertEqual(repeated_credit, 0)
+        self.assertEqual(conversion.pk, repeated_conversion.pk)
+        account.refresh_from_db()
+        participant.refresh_from_db()
+        self.assertEqual((account.balance, account.lifetime_earned), (100, 600))
+        self.assertEqual(participant.beer_chip_millis, 15_000)
+        self.assertEqual((conversion.clicker_spent, conversion.beer_chip_millis), (500, 5_000))
+        self.assertEqual(ClickerDailyConversion.objects.count(), 1)
+        self.assertEqual(
+            ChipBalanceEvent.objects.filter(reason=ChipBalanceEvent.Reason.CLICKER_CONVERSION).count(),
+            1,
+        )
+
+    def test_conversion_endpoint_reports_a_noop_after_the_daily_cap(self):
+        ClickerAccount.objects.create(participant=self.participant, balance=500, lifetime_earned=500)
+
+        first = self.post_json(self.convert_url, {"name": "Maya"})
+        repeated = self.post_json(self.convert_url, {"name": "Maya"})
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["credited_millis"], 5_000)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()["credited_millis"], 0)
+        self.assertEqual(repeated.json()["account"]["remaining_daily_conversion_millis"], 0)
+
+    def test_clicker_leaderboard_orders_lifetime_then_balance_then_name(self):
+        ari = self.person(self.trip, "Ari")
+        bea = self.person(self.trip, "Bea")
+        ClickerAccount.objects.create(participant=self.participant, balance=8, lifetime_earned=50)
+        ClickerAccount.objects.create(participant=ari, balance=9, lifetime_earned=50)
+        ClickerAccount.objects.create(participant=bea, balance=100, lifetime_earned=40)
+
+        leaderboard = clicker_leaderboard(self.trip)
+
+        self.assertEqual(
+            [(entry["name"], entry["lifetime_earned"], entry["clicker_balance"]) for entry in leaderboard],
+            [("Ari", 50, 9), ("Maya", 50, 8), ("Bea", 40, 100)],
+        )
+
+    def test_clicker_page_uses_the_shared_navigation_and_script(self):
+        response = self.client.get(reverse("beer_clicker", args=[self.trip.public_id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Beer-clicker")
+        self.assertContains(response, 'src="/static/scheduler/beer_clicker.js"')
+        self.assertContains(response, reverse("beermarket", args=[self.trip.public_id]))
+        self.assertContains(response, reverse("chip_leaderboard", args=[self.trip.public_id]))
 
 class BeermarketTests(TestCase, TripFactoryMixin):
     def setUp(self):

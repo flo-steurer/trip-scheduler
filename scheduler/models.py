@@ -112,6 +112,7 @@ class ChipBalanceEvent(models.Model):
         MARKET_TRADE = "market_trade", "Market trade"
         MARKET_PAYOUT = "market_payout", "Market payout"
         LEGACY_REFUND = "legacy_refund", "Legacy market refund"
+        CLICKER_CONVERSION = "clicker_conversion", "Beer-clicker conversion"
 
     participant = models.ForeignKey(Participant, related_name="chip_balance_events", on_delete=models.CASCADE)
     amount_millis = models.IntegerField()
@@ -124,6 +125,49 @@ class ChipBalanceEvent(models.Model):
 
     def __str__(self):
         return f"{self.participant}: {self.amount_millis / 1000:g} chips"
+
+
+class ClickerAccount(models.Model):
+    """A participant's separate Beer-clicker currency account."""
+
+    participant = models.OneToOneField(
+        Participant,
+        related_name="clicker_account",
+        on_delete=models.CASCADE,
+    )
+    balance = models.PositiveIntegerField(default=0)
+    lifetime_earned = models.PositiveIntegerField(default=0)
+    last_clicked_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.participant}: {self.balance} clicker currency"
+
+
+class ClickerDailyConversion(models.Model):
+    """The auditable daily limit for moving clicker currency into Beer Chips."""
+
+    participant = models.ForeignKey(
+        Participant,
+        related_name="clicker_daily_conversions",
+        on_delete=models.CASCADE,
+    )
+    conversion_date = models.DateField()
+    clicker_spent = models.PositiveIntegerField(default=0)
+    beer_chip_millis = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["participant", "conversion_date"],
+                name="unique_clicker_conversion_per_participant_day",
+            ),
+        ]
+        ordering = ["-conversion_date", "-id"]
+
+    def __str__(self):
+        return f"{self.participant}: {self.beer_chip_millis / 1000:g} chips on {self.conversion_date}"
 
 
 class Availability(models.Model):

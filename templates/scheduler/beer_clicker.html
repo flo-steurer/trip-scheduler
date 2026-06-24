@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Beer-clicker · {{ trip.title }}{% endblock %}
+{% block content %}
+<div class="shell clicker-shell" id="clicker-app"
+     data-trip-id="{{ trip.public_id }}"
+     data-status-url="{% url 'beer_clicker_status_api' trip.public_id %}"
+     data-click-url="{% url 'beer_clicker_click_api' trip.public_id %}"
+     data-convert-url="{% url 'beer_clicker_convert_api' trip.public_id %}">
+  <div hidden>{% csrf_token %}</div>
+  <section class="clicker-heading">
+    <p class="eyebrow">A tiny trip distraction</p>
+    <h1>Beer-clicker</h1>
+    <p>Build a pile of clicker currency, then choose when to trade a limited amount into Beer Chips for the market.</p>
+  </section>
+
+  <section class="clicker-account card" aria-labelledby="clicker-account-title">
+    <div><p class="eyebrow">Your tap</p><h2 id="clicker-account-title">Pick your name</h2></div>
+    <div class="clicker-account-controls"><label for="clicker-name">Name<input id="clicker-name" maxlength="80" autocomplete="name" placeholder="e.g. Sam"></label><button id="clicker-save-name" class="button small" type="button">Save</button></div>
+    <span id="clicker-state" class="save-state" aria-live="polite"></span>
+  </section>
+
+  <section class="clicker-game card" aria-labelledby="clicker-game-title">
+    <div class="clicker-game-copy"><p class="eyebrow">Tap room</p><h2 id="clicker-game-title">Pour one</h2><p>One clicker unit per tap. The server accepts up to 10 taps per second.</p></div>
+    <div class="clicker-button-wrap"><button id="beer-click-button" class="beer-click-button" type="button" disabled aria-describedby="clicker-state"><span class="beer-foam" aria-hidden="true"></span><strong>Tap the pint</strong><small>+1 clicker currency</small></button><div id="clicker-floaters" class="clicker-floaters" aria-hidden="true"></div></div>
+    <dl class="clicker-totals"><div><dt>Clicker balance</dt><dd id="clicker-balance">0</dd></div><div><dt>Lifetime earned</dt><dd id="clicker-lifetime">0</dd></div></dl>
+  </section>
+
+  <section class="clicker-conversion card" aria-labelledby="clicker-conversion-title">
+    <div><p class="eyebrow">Beer Chip exchange</p><h2 id="clicker-conversion-title">Cash out carefully</h2><p id="clicker-rate">100 clicker currency = 1 Beer Chip. You can convert up to 5 Beer Chips each UTC day.</p></div>
+    <div class="clicker-conversion-action"><p id="clicker-allowance">Today’s remaining allowance: 5 Beer Chips</p><button id="clicker-convert" class="button" type="button" disabled>Convert available currency</button><span id="clicker-conversion-status" class="save-state" aria-live="polite"></span></div>
+  </section>
+
+  <section class="clicker-leaderboard card" aria-labelledby="clicker-leaderboard-title">
+    <div class="section-heading"><div><p class="eyebrow">The standings</p><h2 id="clicker-leaderboard-title">Top tappers</h2></div><span class="karma-explainer">Lifetime earned</span></div>
+    <ol id="clicker-leaderboard-list" class="leaderboard-list">
+      {% for entry in leaderboard %}
+        <li class="leaderboard-entry {% if entry.rank == 1 %}leaderboard-leader{% endif %}"><span class="leaderboard-rank">{% if entry.rank == 1 %}👑{% else %}{{ entry.rank }}{% endif %}</span><div class="leaderboard-person"><strong>{{ entry.name }}</strong><span>{{ entry.clicker_balance }} available</span></div><strong class="karma-score">{{ entry.lifetime_earned }} <span>earned</span></strong></li>
+      {% empty %}
+        <li class="empty">No one has joined this trip yet. Start the tap.</li>
+      {% endfor %}
+    </ol>
+  </section>
+</div>
+<script src="{% static 'scheduler/beer_clicker.js' %}"></script>
+{% endblock %}

@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 
-from .models import Availability, DailyBeercoinGrant, Market, MarketTrade, Participant, Trip
+from .models import Availability, ClickerAccount, ClickerDailyConversion, DailyBeercoinGrant, Market, MarketTrade, Participant, Trip
 
 
 class AvailabilityInline(admin.TabularInline):
@@ -38,6 +38,25 @@ class DailyBeercoinGrantAdmin(admin.ModelAdmin):
     @admin.display(description="Beer Chips")
     def beercoin_amount(self, grant):
         return f"{grant.amount_millis / 1000:g}"
+
+
+@admin.register(ClickerAccount)
+class ClickerAccountAdmin(admin.ModelAdmin):
+    list_display = ("participant", "balance", "lifetime_earned", "last_clicked_at")
+    list_select_related = ("participant", "participant__trip")
+    search_fields = ("participant__name",)
+
+
+@admin.register(ClickerDailyConversion)
+class ClickerDailyConversionAdmin(admin.ModelAdmin):
+    list_display = ("participant", "conversion_date", "clicker_spent", "beer_chip_balance")
+    list_select_related = ("participant", "participant__trip")
+    search_fields = ("participant__name",)
+    readonly_fields = ("participant", "conversion_date", "clicker_spent", "beer_chip_millis", "created_at", "updated_at")
+
+    @admin.display(description="Beer Chips")
+    def beer_chip_balance(self, conversion):
+        return f"{conversion.beer_chip_millis / 1000:g}"
 
 
 class MarketTradeInline(admin.TabularInline):

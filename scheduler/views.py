@@ -15,7 +15,17 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from .forms import TripForm
 from .models import Availability, ChipBalanceEvent, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
-from .services import chip_holdings_history, chip_leaderboard, idea_leaderboard, market_performance, trip_results
+from .services import (
+    award_clicker_click,
+    chip_holdings_history,
+    chip_leaderboard,
+    clicker_leaderboard,
+    clicker_status,
+    convert_clicker_currency,
+    idea_leaderboard,
+    market_performance,
+    trip_results,
+)
 from world_cup.models import WorldCupMarket
 from world_cup.services import materialize_world_cup_markets_for_trip
 
@@ -198,6 +208,80 @@ def beermarket(request, public_id):
         "trip": trip,
         "initial_results": trip_results(trip),
     })
+
+
+@require_GET
+def beer_clicker(request, public_id):
+    trip = _trip(public_id)
+    return render(request, "scheduler/beer_clicker.html", {
+        "trip": trip,
+        "leaderboard": clicker_leaderboard(trip),
+    })
+
+
+def _clicker_response(trip, participant, account=None, **extra):
+    payload = {
+        "account": clicker_status(participant, account=account),
+        "leaderboard": clicker_leaderboard(trip),
+    }
+    payload.update(extra)
+    return JsonResponse(payload)
+
+
+@require_POST
+def beer_clicker_status_api(request, public_id):
+    trip = _trip(public_id)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    _activity(request, participant, "beer_clicker_opened")
+    return _clicker_response(trip, participant)
+
+
+@require_POST
+def beer_clicker_click_api(request, public_id):
+    trip = _trip(public_id)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    participant, account, retry_after = award_clicker_click(participant)
+    if retry_after is not None:
+        response = _clicker_response(
+            trip,
+            participant,
+            account,
+            error="Beer needs a moment. Try again shortly.",
+            retry_after_ms=max(1, round(retry_after * 1000)),
+        )
+        response.status_code = 429
+        return response
+    _activity(request, participant, "beer_clicker_clicked")
+    return _clicker_response(trip, participant, account, earned=1)
+
+
+@require_POST
+def beer_clicker_convert_api(request, public_id):
+    trip = _trip(public_id)
+    body = _json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
+    participant, error = _participant_for_name(trip, body.get("name"))
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    participant, account, _conversion, credited_millis = convert_clicker_currency(participant)
+    _activity(request, participant, "beer_clicker_converted" if credited_millis else "beer_clicker_conversion_noop")
+    return _clicker_response(
+        trip,
+        participant,
+        account,
+        credited_millis=credited_millis,
+    )
 
 
 @require_POST
