@@ -80,7 +80,7 @@
       const item = document.createElement('li');
       const top = document.createElement('div'); top.className = 'market-stake-top';
       const name = document.createElement('strong'); name.textContent = position.name;
-      const amount = document.createElement('span'); amount.textContent = `${formatChips(position.cost_millis)} chips`;
+      const amount = document.createElement('span'); amount.textContent = `${formatChips(position.cost_millis)} spent`;
       top.append(name, amount);
       if (market.is_resolved) {
         const detail = document.createElement('span'); detail.className = 'market-stake-detail';
@@ -96,8 +96,8 @@
         }
         const scenarios = document.createElement('span'); scenarios.className = 'market-stake-detail';
         const pnl = position.profit_loss_millis >= 0 ? `+${formatChips(position.profit_loss_millis)}` : formatChips(position.profit_loss_millis);
-        scenarios.textContent = `Value: ${formatChips(position.mark_value_millis)} · P/L: ${pnl} chips`;
-        const payout = document.createElement('span'); payout.className = 'market-stake-detail'; payout.textContent = `If Yes: ${formatChips(position.yes_payout_millis)} · If No: ${formatChips(position.no_payout_millis)} chips`;
+        scenarios.textContent = `Value: ${formatChips(position.mark_value_millis)} chips · P/L: ${pnl} chips`;
+        const payout = document.createElement('span'); payout.className = 'market-stake-detail'; payout.textContent = `If Yes: ${formatChips(position.yes_payout_millis)} chips · If No: ${formatChips(position.no_payout_millis)} chips`;
         item.append(top, entries, scenarios, payout);
       }
       list.append(item);

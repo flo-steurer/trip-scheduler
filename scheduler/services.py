@@ -504,8 +504,8 @@ def trip_results(trip):
             positions = defaultdict(lambda: {
                 "yes_shares_millis": 0,
                 "no_shares_millis": 0,
-                "yes_entry_total": 0,
-                "no_entry_total": 0,
+                "yes_cost_millis": 0,
+                "no_cost_millis": 0,
                 "cost_millis": 0,
             })
             prior_trades = []
@@ -517,10 +517,10 @@ def trip_results(trip):
                 position["cost_millis"] += trade_cost_millis
                 if trade.outcome == "yes":
                     position["yes_shares_millis"] += trade_shares_millis
-                    position["yes_entry_total"] += trade_shares_millis * trade.entry_odds
+                    position["yes_cost_millis"] += trade_cost_millis
                 else:
                     position["no_shares_millis"] += trade_shares_millis
-                    position["no_entry_total"] += trade_shares_millis * trade.entry_odds
+                    position["no_cost_millis"] += trade_cost_millis
                 prior_trades.append(trade)
                 _a, _b, historical_yes_price = market.share_market_state(prior_trades)
                 odds_history.append({"timestamp": trade.created_at.isoformat(), "yes_odds": round(historical_yes_price * 100)})
@@ -542,8 +542,16 @@ def trip_results(trip):
                     shares["yes_shares_millis"] * yes_price
                     + shares["no_shares_millis"] * (1 - yes_price)
                 ) - shares["cost_millis"],
-                "yes_entry_odds": round(shares["yes_entry_total"] / shares["yes_shares_millis"]) if shares["yes_shares_millis"] else None,
-                "no_entry_odds": round(shares["no_entry_total"] / shares["no_shares_millis"]) if shares["no_shares_millis"] else None,
+                "yes_entry_odds": (
+                    round(shares["yes_cost_millis"] / shares["yes_shares_millis"] * 100)
+                    if shares["yes_shares_millis"]
+                    else None
+                ),
+                "no_entry_odds": (
+                    round(shares["no_cost_millis"] / shares["no_shares_millis"] * 100)
+                    if shares["no_shares_millis"]
+                    else None
+                ),
                 "yes_payout_millis": shares["yes_shares_millis"],
                 "no_payout_millis": shares["no_shares_millis"],
                 "payout_millis": payouts.get(participant_id, 0),

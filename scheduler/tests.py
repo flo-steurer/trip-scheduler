@@ -628,8 +628,34 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         self.assertEqual(len(market["odds_history"]), 2)
         self.assertEqual(market["positions"][0]["name"], "Maya")
         self.assertEqual(market["positions"][0]["cost_millis"], 3000)
-        self.assertEqual(market["positions"][0]["yes_entry_odds"], 50)
+        trade = MarketTrade.objects.get()
+        self.assertEqual(
+            market["positions"][0]["yes_entry_odds"],
+            round(trade.cost_millis / trade.shares_millis * 100),
+        )
+        self.assertGreater(market["positions"][0]["yes_entry_odds"], 50)
         self.assertGreater(market["positions"][0]["yes_shares_millis"], 3000)
+
+    def test_position_entry_odds_use_average_fill_price_per_side(self):
+        yes_response = self.post_json({"name": "Maya", "outcome": "yes", "chips": 3})
+        self.assertEqual(yes_response.status_code, 200)
+        no_response = self.post_json({"name": "Maya", "outcome": "no", "chips": 2})
+        self.assertEqual(no_response.status_code, 200)
+
+        market = no_response.json()["results"]["markets"][0]
+        position = market["positions"][0]
+        yes_trade = MarketTrade.objects.get(outcome=Market.Outcome.YES)
+        no_trade = MarketTrade.objects.get(outcome=Market.Outcome.NO)
+
+        self.assertEqual(position["cost_millis"], 5000)
+        self.assertEqual(
+            position["yes_entry_odds"],
+            round(yes_trade.cost_millis / yes_trade.shares_millis * 100),
+        )
+        self.assertEqual(
+            position["no_entry_odds"],
+            round(no_trade.cost_millis / no_trade.shares_millis * 100),
+        )
 
     def test_resolution_pays_the_pool_to_winners_and_locks_the_market(self):
         maya = self.person(self.trip, "Maya")
