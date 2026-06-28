@@ -1,7 +1,7 @@
 import uuid
 from collections import defaultdict
 from datetime import date
-from math import exp, log
+from math import ceil, exp, log
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -111,7 +111,6 @@ class ChipBalanceEvent(models.Model):
         DAILY_GRANT = "daily_grant", "Daily grant"
         MARKET_TRADE = "market_trade", "Market trade"
         MARKET_PAYOUT = "market_payout", "Market payout"
-        LEGACY_REFUND = "legacy_refund", "Legacy market refund"
         CLICKER_CONVERSION = "clicker_conversion", "Beer-clicker conversion"
 
     participant = models.ForeignKey(Participant, related_name="chip_balance_events", on_delete=models.CASCADE)
@@ -264,24 +263,18 @@ class ProposalBookingInterest(models.Model):
 
 class Market(models.Model):
     SHARE_SCALE = 1000
+    DEFAULT_SEED_CHIPS = 50
 
     class Outcome(models.TextChoices):
         YES = "yes", "Yes"
         NO = "no", "No"
 
-    class PricingModel(models.TextChoices):
-        LEGACY = "legacy", "Legacy pool"
-        SHARES = "shares", "Share market"
-
     trip = models.ForeignKey(Trip, related_name="markets", on_delete=models.CASCADE)
     question = models.CharField(max_length=240)
-    pricing_model = models.CharField(max_length=12, choices=PricingModel.choices, default=PricingModel.SHARES)
     resolved_outcome = models.CharField(max_length=3, choices=Outcome.choices, blank=True)
-    seed_chips = models.PositiveSmallIntegerField(default=10)
+    seed_chips = models.PositiveIntegerField(default=DEFAULT_SEED_CHIPS)
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
-    cancelled_at = models.DateTimeField(null=True, blank=True)
-    replacement = models.ForeignKey("self", related_name="replaced_markets", on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -290,9 +283,30 @@ class Market(models.Model):
     def is_resolved(self):
         return bool(self.resolved_outcome)
 
-    @property
-    def is_cancelled(self):
-        return self.cancelled_at is not None
+    @classmethod
+    def seed_chips_for_trip(cls, trip):
+        """Choose stable liquidity from the chip economy when a market is created."""
+        balances = trip.participants.aggregate(
+            total_millis=models.Sum("beer_chip_millis"),
+            participant_count=models.Count("id"),
+        )
+        total_millis = balances["total_millis"] or 0
+        participant_count = balances["participant_count"] or 0
+        if not total_millis or not participant_count:
+            return cls.DEFAULT_SEED_CHIPS
+
+        average_chips = ceil(total_millis / participant_count / cls.SHARE_SCALE)
+        total_quarter_chips = ceil(total_millis / cls.SHARE_SCALE / 4)
+        return max(cls.DEFAULT_SEED_CHIPS, average_chips, total_quarter_chips)
+
+    def save(self, *args, **kwargs):
+        if (
+            self._state.adding
+            and self.trip_id
+            and self.seed_chips == self.DEFAULT_SEED_CHIPS
+        ):
+            self.seed_chips = self.seed_chips_for_trip(self.trip)
+        super().save(*args, **kwargs)
 
     @staticmethod
     def _lmsr_cost(yes_shares_millis, no_shares_millis, liquidity):
@@ -334,28 +348,6 @@ class Market(models.Model):
                 high = middle
         return max(int(low * self.SHARE_SCALE), 1)
 
-    @staticmethod
-    def payout_distribution(trades, outcome):
-        total_pool = sum(trade.chips for trade in trades)
-        winning_stakes = defaultdict(int)
-        for trade in trades:
-            if trade.outcome == outcome:
-                winning_stakes[trade.participant_id] += trade.chips
-        winning_pool = sum(winning_stakes.values())
-        if not winning_pool:
-            return {}
-
-        payouts = {}
-        remainders = []
-        for participant_id, stake in winning_stakes.items():
-            gross_payout = total_pool * stake
-            payouts[participant_id], remainder = divmod(gross_payout, winning_pool)
-            remainders.append((remainder, participant_id))
-        unallocated = total_pool - sum(payouts.values())
-        for _remainder, participant_id in sorted(remainders, key=lambda item: (-item[0], item[1]))[:unallocated]:
-            payouts[participant_id] += 1
-        return payouts
-
     def resolve(self, outcome):
         if outcome not in self.Outcome.values:
             raise ValidationError("Choose a valid market outcome.")
@@ -364,36 +356,25 @@ class Market(models.Model):
             if market.is_resolved:
                 raise ValidationError("This market has already been resolved.")
             trades = list(market.trades.select_for_update().all())
-            if market.pricing_model == self.PricingModel.SHARES:
-                payouts = defaultdict(int)
-                for trade in trades:
-                    if trade.outcome == outcome:
-                        payouts[trade.participant_id] += trade.shares_millis if trade.shares_millis is not None else trade.chips * self.SHARE_SCALE
-                for participant_id, payout in payouts.items():
-                    participant = Participant.objects.select_for_update().get(pk=participant_id)
-                    participant.beer_chip_millis += payout
-                    participant.beer_karma_bonus += 1
-                    participant.save(update_fields=["beer_chip_millis", "beer_karma_bonus"])
-                    ChipBalanceEvent.objects.create(
-                        participant=participant,
-                        amount_millis=payout,
-                        balance_after_millis=participant.beer_chip_millis,
-                        reason=ChipBalanceEvent.Reason.MARKET_PAYOUT,
+            payouts = defaultdict(int)
+            for trade in trades:
+                if trade.outcome == outcome:
+                    payouts[trade.participant_id] += (
+                        trade.shares_millis
+                        if trade.shares_millis is not None
+                        else trade.chips * self.SHARE_SCALE
                     )
-            else:
-                payouts = self.payout_distribution(trades, outcome)
-                for participant_id, payout in payouts.items():
-                    participant = Participant.objects.select_for_update().get(pk=participant_id)
-                    payout_millis = payout * self.SHARE_SCALE
-                    participant.beer_chip_millis += payout_millis
-                    participant.beer_karma_bonus += 1
-                    participant.save(update_fields=["beer_chip_millis", "beer_karma_bonus"])
-                    ChipBalanceEvent.objects.create(
-                        participant=participant,
-                        amount_millis=payout_millis,
-                        balance_after_millis=participant.beer_chip_millis,
-                        reason=ChipBalanceEvent.Reason.MARKET_PAYOUT,
-                    )
+            for participant_id, payout in payouts.items():
+                participant = Participant.objects.select_for_update().get(pk=participant_id)
+                participant.beer_chip_millis += payout
+                participant.beer_karma_bonus += 1
+                participant.save(update_fields=["beer_chip_millis", "beer_karma_bonus"])
+                ChipBalanceEvent.objects.create(
+                    participant=participant,
+                    amount_millis=payout,
+                    balance_after_millis=participant.beer_chip_millis,
+                    reason=ChipBalanceEvent.Reason.MARKET_PAYOUT,
+                )
             market.resolved_outcome = outcome
             market.resolved_at = timezone.now()
             market.save(update_fields=["resolved_outcome", "resolved_at"])

@@ -493,16 +493,17 @@ def market_trade_api(request, public_id, market_id):
         participant = Participant.objects.select_for_update().get(pk=participant.pk)
         if market.is_resolved:
             return JsonResponse({"error": "This Beermarket has already been resolved."}, status=400)
-        if market.is_cancelled:
-            return JsonResponse({"error": "This legacy market has been replaced."}, status=400)
-        if market.pricing_model != Market.PricingModel.SHARES:
-            return JsonResponse({"error": "This legacy pool market must be rebuilt before trading."}, status=400)
         world_cup_market = WorldCupMarket.objects.select_related("fixture").filter(market=market).first()
         if world_cup_market and not world_cup_market.fixture.is_tradeable:
             return JsonResponse({"error": "This World Cup market is no longer accepting trades."}, status=400)
         if chip_millis > participant.beer_chip_millis:
             return JsonResponse({"error": "You do not have that many Beer Chips."}, status=400)
         existing_trades = list(market.trades.all())
+        if not existing_trades:
+            seed_chips = Market.seed_chips_for_trip(trip)
+            if market.seed_chips < seed_chips:
+                market.seed_chips = seed_chips
+                market.save(update_fields=["seed_chips"])
         _yes_shares, _no_shares, yes_price = market.share_market_state(existing_trades)
         entry_odds = round((yes_price if outcome == Market.Outcome.YES else 1 - yes_price) * 100)
         shares_millis = market.shares_for_cost(existing_trades, outcome, chip_millis)

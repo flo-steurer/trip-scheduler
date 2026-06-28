@@ -432,7 +432,7 @@ class ResultsTests(TestCase, TripFactoryMixin):
             [ChipBalanceEvent.Reason.OPENING_BALANCE, ChipBalanceEvent.Reason.DAILY_GRANT],
         )
 
-    def test_market_performance_uses_only_settled_share_markets_and_ranks_final_net_results(self):
+    def test_market_performance_uses_only_settled_markets_and_ranks_final_net_results(self):
         trip = self.make_trip()
         ari = self.person(trip, "Ari")
         bea = self.person(trip, "Bea")
@@ -440,14 +440,12 @@ class ResultsTests(TestCase, TripFactoryMixin):
         settled_yes = Market.objects.create(trip=trip, question="Settled yes", resolved_outcome=Market.Outcome.YES)
         settled_no = Market.objects.create(trip=trip, question="Settled no", resolved_outcome=Market.Outcome.NO)
         open_market = Market.objects.create(trip=trip, question="Open")
-        legacy = Market.objects.create(trip=trip, question="Legacy", pricing_model=Market.PricingModel.LEGACY, resolved_outcome=Market.Outcome.YES)
         MarketTrade.objects.bulk_create([
             MarketTrade(market=settled_yes, participant=ari, outcome="yes", chips=3, cost_millis=3000, shares_millis=6000),
             MarketTrade(market=settled_yes, participant=bea, outcome="no", chips=5, cost_millis=5000, shares_millis=1000),
             MarketTrade(market=settled_no, participant=ari, outcome="yes", chips=2, cost_millis=2000, shares_millis=1000),
             MarketTrade(market=settled_no, participant=bea, outcome="no", chips=1, cost_millis=1000, shares_millis=4000),
             MarketTrade(market=open_market, participant=cam, outcome="yes", chips=9, cost_millis=9000, shares_millis=18000),
-            MarketTrade(market=legacy, participant=cam, outcome="yes", chips=8, cost_millis=8000, shares_millis=16000),
         ])
 
         performance = market_performance(trip)
@@ -615,6 +613,62 @@ class BeermarketTests(TestCase, TripFactoryMixin):
     def post_json(self, data):
         return self.client.post(self.url, data=json.dumps(data), content_type="application/json")
 
+    def test_new_share_markets_seed_from_trip_chip_economy(self):
+        trip = self.make_trip(title="Bigger bankroll")
+        for index in range(8):
+            participant = self.person(trip, f"Trader {index}")
+            participant.beer_chip_millis = 100000
+            participant.save(update_fields=["beer_chip_millis"])
+
+        market = Market.objects.create(trip=trip, question="Will liquidity scale?")
+
+        self.assertEqual(market.seed_chips, 200)
+
+    def test_higher_seed_reduces_normal_bet_price_impact(self):
+        shallow = Market.objects.create(trip=self.trip, question="Shallow", seed_chips=10)
+        seeded = Market.objects.create(trip=self.trip, question="Seeded", seed_chips=200)
+        shallow_shares = shallow.shares_for_cost([], Market.Outcome.YES, 10000)
+        seeded_shares = seeded.shares_for_cost([], Market.Outcome.YES, 10000)
+
+        shallow_yes_price = shallow.share_market_state([
+            MarketTrade(
+                market=shallow,
+                participant=self.person(self.trip, "Shallow Buyer"),
+                outcome="yes",
+                chips=10,
+                shares_millis=shallow_shares,
+            )
+        ])[2]
+        seeded_yes_price = seeded.share_market_state([
+            MarketTrade(
+                market=seeded,
+                participant=self.person(self.trip, "Seeded Buyer"),
+                outcome="yes",
+                chips=10,
+                shares_millis=seeded_shares,
+            )
+        ])[2]
+
+        self.assertGreater(round(shallow_yes_price * 100), 70)
+        self.assertLess(round(seeded_yes_price * 100), 55)
+
+    def test_first_trade_raises_untraded_market_seed_from_current_trip_economy(self):
+        market = Market.objects.create(trip=self.trip, question="Created before bankroll")
+        trader = self.person(self.trip, "Maya")
+        trader.beer_chip_millis = 100000
+        trader.save(update_fields=["beer_chip_millis"])
+        url = reverse("market_trade_api", args=[self.trip.public_id, market.id])
+
+        response = self.client.post(
+            url,
+            data=json.dumps({"name": "Maya", "outcome": "yes", "chips": 10}),
+            content_type="application/json",
+        )
+
+        market.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(market.seed_chips, 100)
+
     def test_trade_deducts_chips_and_updates_market_odds_history(self):
         first = self.post_json({"name": "Maya", "outcome": "yes", "chips": 3})
         self.assertEqual(first.status_code, 200)
@@ -681,32 +735,6 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         self.assertEqual(rejected.status_code, 400)
         participants = {participant["name"]: participant for participant in trip_results(self.trip)["participants"]}
         self.assertEqual(participants["Maya"]["beer_karma"], 1)
-
-    def test_rebuild_command_refunds_and_replaces_open_legacy_markets(self):
-        legacy = Market.objects.create(
-            trip=self.trip,
-            question="Will Kai join the trip planning?",
-            pricing_model=Market.PricingModel.LEGACY,
-        )
-        maya = self.person(self.trip, "Maya")
-        maya.beer_chip_millis = 7000
-        maya.save(update_fields=["beer_chip_millis"])
-        MarketTrade.objects.create(market=legacy, participant=maya, outcome="yes", chips=3)
-
-        preview = StringIO()
-        call_command("rebuild_beermarket", stdout=preview)
-        self.assertIn("Dry run only", preview.getvalue())
-        legacy.refresh_from_db()
-        self.assertIsNone(legacy.cancelled_at)
-
-        call_command("rebuild_beermarket", "--apply", stdout=StringIO())
-        legacy.refresh_from_db()
-        maya.refresh_from_db()
-        self.assertIsNotNone(legacy.cancelled_at)
-        self.assertEqual(maya.beer_chip_millis, 10000)
-        self.assertEqual(legacy.replacement.pricing_model, Market.PricingModel.SHARES)
-        self.assertEqual(legacy.replacement.question, legacy.question)
-
 
 class ProposalApiTests(TestCase, TripFactoryMixin):
     def setUp(self):

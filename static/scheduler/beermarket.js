@@ -116,7 +116,6 @@
     );
     const status = document.createElement('span'); status.className = `market-status${market.is_resolved ? ' resolved' : ''}${fixtureIsLive ? ' live' : ''}`;
     if (market.is_resolved) status.textContent = fixture?.final_score ? `Final: ${fixture.final_score}` : `Resolved: ${market.resolved_outcome === 'yes' ? 'Yes' : 'No'}`;
-    else if (market.pricing_model === 'legacy') status.textContent = 'Legacy market';
     else if (fixture) status.textContent = fixtureIsLive ? `Live${fixture.current_score ? ` · ${fixture.current_score}` : ''}` : fixture.status === 'cancelled' ? 'Cancelled' : 'Upcoming';
     else status.textContent = 'Live';
     top.append(question, status); card.append(top);
@@ -137,9 +136,6 @@
     analysis.append(chart, stakePanel(market));
     card.append(prices, analysis);
     const pool = document.createElement('p'); pool.className = 'market-pool'; pool.textContent = `${formatChips(market.total_chips_millis)} Beer Chips traded`; card.append(pool);
-    if (market.pricing_model === 'legacy' && !market.is_resolved) {
-      const legacy = document.createElement('p'); legacy.className = 'market-position'; legacy.textContent = 'This legacy pool market must be rebuilt before it can accept share trades.'; card.append(legacy);
-    }
     if (market.is_tradeable) {
       const trade = document.createElement('div'); trade.className = 'market-trade';
       const amount = document.createElement('input'); amount.type = 'number'; amount.min = '0.001'; amount.step = '0.001'; amount.max = formatChips(ownParticipant()?.beer_chip_millis ?? 10000); amount.value = '1'; amount.setAttribute('aria-label', 'Beer Chips to spend');
