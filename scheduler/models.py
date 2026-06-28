@@ -263,7 +263,7 @@ class ProposalBookingInterest(models.Model):
 
 class Market(models.Model):
     SHARE_SCALE = 1000
-    DEFAULT_SEED_CHIPS = 50
+    DEFAULT_SEED_CHIPS = 25
 
     class Outcome(models.TextChoices):
         YES = "yes", "Yes"
@@ -295,9 +295,9 @@ class Market(models.Model):
         if not total_millis or not participant_count:
             return cls.DEFAULT_SEED_CHIPS
 
-        average_chips = ceil(total_millis / participant_count / cls.SHARE_SCALE)
-        total_quarter_chips = ceil(total_millis / cls.SHARE_SCALE / 4)
-        return max(cls.DEFAULT_SEED_CHIPS, average_chips, total_quarter_chips)
+        half_average_chips = ceil(total_millis / participant_count / cls.SHARE_SCALE / 2)
+        total_twentieth_chips = ceil(total_millis / cls.SHARE_SCALE / 20)
+        return max(cls.DEFAULT_SEED_CHIPS, half_average_chips, total_twentieth_chips)
 
     def save(self, *args, **kwargs):
         if (

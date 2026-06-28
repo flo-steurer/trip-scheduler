@@ -622,11 +622,11 @@ class BeermarketTests(TestCase, TripFactoryMixin):
 
         market = Market.objects.create(trip=trip, question="Will liquidity scale?")
 
-        self.assertEqual(market.seed_chips, 200)
+        self.assertEqual(market.seed_chips, 50)
 
-    def test_higher_seed_reduces_normal_bet_price_impact(self):
+    def test_middle_seed_keeps_normal_bet_price_impact_visible(self):
         shallow = Market.objects.create(trip=self.trip, question="Shallow", seed_chips=10)
-        seeded = Market.objects.create(trip=self.trip, question="Seeded", seed_chips=200)
+        seeded = Market.objects.create(trip=self.trip, question="Seeded", seed_chips=50)
         shallow_shares = shallow.shares_for_cost([], Market.Outcome.YES, 10000)
         seeded_shares = seeded.shares_for_cost([], Market.Outcome.YES, 10000)
 
@@ -650,7 +650,8 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         ])[2]
 
         self.assertGreater(round(shallow_yes_price * 100), 70)
-        self.assertLess(round(seeded_yes_price * 100), 55)
+        self.assertGreater(round(seeded_yes_price * 100), 55)
+        self.assertLess(round(seeded_yes_price * 100), 65)
 
     def test_first_trade_raises_untraded_market_seed_from_current_trip_economy(self):
         market = Market.objects.create(trip=self.trip, question="Created before bankroll")
@@ -667,7 +668,7 @@ class BeermarketTests(TestCase, TripFactoryMixin):
 
         market.refresh_from_db()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(market.seed_chips, 100)
+        self.assertEqual(market.seed_chips, 50)
 
     def test_trade_deducts_chips_and_updates_market_odds_history(self):
         first = self.post_json({"name": "Maya", "outcome": "yes", "chips": 3})
