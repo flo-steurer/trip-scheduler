@@ -34,10 +34,6 @@
   const localDate = (iso) => new Date(`${iso}T12:00:00`);
   const currentName = () => nameInput.value.trim();
   const ownParticipant = () => results.participants.find((person) => person.name.toLocaleLowerCase() === currentName().toLocaleLowerCase());
-  const formatChips = (millis) => {
-    const chips = (millis ?? 0) / 1000;
-    return Number.isInteger(chips) ? String(chips) : chips.toFixed(3).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
-  };
   const formatMoney = (amount, currency) => {
     if (amount === null || amount === undefined || amount === '') return '';
     try {
@@ -393,9 +389,7 @@
       const card = document.createElement('article'); card.className = 'person-card';
       const heading = document.createElement('div'); heading.className = 'person-card-heading';
       const name = document.createElement('h3'); name.textContent = person.name;
-      const chips = formatChips(person.beer_chip_millis);
-      const karma = document.createElement('span'); karma.className = 'person-karma'; karma.textContent = `✦ ${person.beer_karma || 0} · ${chips} chips`; karma.title = `${person.beer_karma || 0} Beer Karma · ${chips} Beer Chips`;
-      heading.append(name, karma); card.append(heading);
+      heading.append(name); card.append(heading);
       const minimum = document.createElement('p'); minimum.className = 'participant-minimum'; minimum.textContent = `Minimum: ${minimumAttendanceLabel(person.minimum_attendance_days)}`; card.append(minimum);
       const mini = document.createElement('div'); mini.className = 'mini-calendar';
       for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {

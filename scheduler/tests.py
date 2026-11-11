@@ -1,16 +1,17 @@
 import json
 from io import StringIO
-from datetime import date, timedelta
+from datetime import date
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase
 from django.test import override_settings
 from django.urls import reverse
-from django.utils import timezone
 from django.contrib.staticfiles import finders
 
-from .models import Availability, ChipBalanceEvent, ClickerAccount, ClickerDailyConversion, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
-from .services import award_clicker_click, chip_holdings_history, chip_leaderboard, clicker_leaderboard, convert_clicker_currency, grant_daily_beercoins, idea_leaderboard, market_performance, trip_results
+from .models import Availability, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
+from .services import trip_results
 
 
 class TripFactoryMixin:
@@ -44,32 +45,7 @@ class TripFormTests(TestCase):
     def test_stylesheet_and_script_are_discoverable_static_assets(self):
         self.assertIsNotNone(finders.find("scheduler/app.css"))
         self.assertIsNotNone(finders.find("scheduler/trip.js"))
-        self.assertIsNotNone(finders.find("scheduler/beermarket.js"))
-        self.assertIsNotNone(finders.find("scheduler/beer_clicker.js"))
-        self.assertIsNotNone(finders.find("scheduler/chip_leaderboard.js"))
-        self.assertIsNotNone(finders.find("scheduler/vendor/echarts.common.min.js"))
         self.assertIsNotNone(finders.find("scheduler/favicon.svg"))
-
-    def test_calendar_uses_millisecond_chip_balances(self):
-        with open(finders.find("scheduler/trip.js"), encoding="utf-8") as script:
-            contents = script.read()
-
-        self.assertIn("person.beer_chip_millis", contents)
-        self.assertNotIn("person.beer_chips", contents)
-        self.assertIn("person.is_active", contents)
-
-    def test_beermarket_groups_world_cup_markets_separately(self):
-        with open(finders.find("scheduler/beermarket.js"), encoding="utf-8") as script:
-            contents = script.read()
-
-        self.assertIn("renderWorldCupMarkets", contents)
-        self.assertIn("renderOtherMarkets", contents)
-        self.assertIn("Show ${settled.length} settled match", contents)
-        self.assertIn("collapsedMarketSections", contents)
-        self.assertIn("aria-expanded", contents)
-        self.assertIn("fixtureIsLive", contents)
-        self.assertIn("fixture.kickoff_at", contents)
-        self.assertIn("fixture.current_score", contents)
 
     def test_trip_page_uses_absolute_static_asset_urls(self):
         trip = Trip.objects.create(
@@ -87,39 +63,6 @@ class TripFormTests(TestCase):
         self.assertIn("csrftoken", response.cookies)
         self.assertContains(response, 'data-collapsible="daily-overlap"')
         self.assertContains(response, 'data-collapsible="trip-ideas" open')
-
-    def test_beermarket_page_uses_its_static_script(self):
-        trip = Trip.objects.create(
-            title="Island escape",
-            start_date=date(2026, 8, 1),
-            end_date=date(2026, 8, 8),
-            minimum_duration_days=4,
-            ideal_duration_days=4,
-            maximum_duration_days=4,
-        )
-        response = self.client.get(reverse("beermarket", args=[trip.public_id]))
-        self.assertContains(response, "Beermarket")
-        self.assertContains(response, 'src="/static/scheduler/beermarket.js"')
-
-    def test_trip_pages_share_the_same_navigation(self):
-        trip = Trip.objects.create(
-            title="Island escape",
-            start_date=date(2026, 8, 1),
-            end_date=date(2026, 8, 8),
-            minimum_duration_days=4,
-            ideal_duration_days=4,
-            maximum_duration_days=4,
-        )
-        pages = ("trip_detail", "beermarket", "beer_clicker", "leaderboard", "chip_leaderboard")
-        navigation = ("trip_detail", "beermarket", "beer_clicker", "leaderboard", "chip_leaderboard", "home")
-
-        for page in pages:
-            response = self.client.get(reverse(page, args=[trip.public_id]))
-            self.assertEqual(response.status_code, 200)
-            for destination in navigation:
-                args = [trip.public_id] if destination != "home" else []
-                self.assertContains(response, reverse(destination, args=args))
-            self.assertContains(response, 'class="trip-nav-link active"')
 
     @override_settings(PUBLIC_BASE_URL="http://100.64.0.10:8000")
     def test_trip_page_uses_configured_public_share_url(self):
@@ -311,30 +254,6 @@ class ResultsTests(TestCase, TripFactoryMixin):
         active_by_name = {participant["name"]: participant["is_active"] for participant in results["participants"]}
         self.assertEqual(active_by_name, {"Ari": True, "Bea": False, "Cy": False})
 
-    def test_daily_beercoins_are_awarded_once_per_day(self):
-        trip = self.make_trip()
-        maya = self.person(trip, "Maya")
-        ari = self.person(trip, "Ari")
-        maya.beer_chip_millis = 3000
-        ari.beer_chip_millis = 7000
-        maya.save(update_fields=["beer_chip_millis"])
-        ari.save(update_fields=["beer_chip_millis"])
-
-        grant, recipient_count = grant_daily_beercoins(date(2026, 7, 1))
-
-        self.assertEqual(recipient_count, 2)
-        self.assertEqual(grant.amount_millis, 10000)
-        maya.refresh_from_db()
-        ari.refresh_from_db()
-        self.assertEqual(maya.beer_chip_millis, 13000)
-        self.assertEqual(ari.beer_chip_millis, 17000)
-
-        repeated_grant, repeated_recipient_count = grant_daily_beercoins(date(2026, 7, 1))
-
-        self.assertEqual(repeated_grant.pk, grant.pk)
-        self.assertEqual(repeated_recipient_count, 0)
-        self.assertEqual(DailyBeercoinGrant.objects.count(), 1)
-
     def test_proposals_are_ranked_by_upvotes_and_expose_voters(self):
         trip = self.make_trip()
         ari = self.person(trip, "Ari")
@@ -348,9 +267,6 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(proposals[0]["title"], "Villa Mare")
         self.assertEqual(proposals[0]["voter_names"], ["Ari", "Bea"])
         self.assertEqual(proposals[1]["title"], "Sicily")
-        participants = {participant["name"]: participant for participant in trip_results(trip)["participants"]}
-        self.assertEqual(participants["Ari"]["idea_karma"], 1)
-        self.assertEqual(participants["Bea"]["idea_karma"], 3)
 
     def test_stay_price_uses_the_smaller_of_best_window_peak_and_villa_sleeps(self):
         trip = self.make_trip(end_date=date(2026, 7, 4), duration_days=2)
@@ -382,360 +298,6 @@ class ResultsTests(TestCase, TripFactoryMixin):
         self.assertEqual(results["windows"][0]["maximum_villa_capacity"], 2)
         self.assertEqual(results["proposals"][0]["price_per_best_window_person"], 1000)
 
-    def test_idea_leaderboard_ranks_karma_then_upvotes(self):
-        trip = self.make_trip()
-        ari = self.person(trip, "Ari")
-        bea = self.person(trip, "Bea")
-        cam = self.person(trip, "Cam")
-        ari_post = Proposal.objects.create(trip=trip, submitted_by=ari, type="destination", title="Sicily")
-        bea_post = Proposal.objects.create(trip=trip, submitted_by=bea, type="stay", title="Villa Mare")
-        ProposalVote.objects.create(proposal=ari_post, participant=bea)
-        ProposalVote.objects.create(proposal=ari_post, participant=cam)
-        ProposalVote.objects.create(proposal=bea_post, participant=ari)
-        leaderboard = idea_leaderboard(trip)
-        self.assertEqual([(entry["name"], entry["karma"]) for entry in leaderboard], [("Ari", 3), ("Bea", 2), ("Cam", 0)])
-        self.assertEqual(leaderboard[0]["title"], "Upvote Magnet")
-
-    def test_chip_leaderboard_ranks_balances_then_names(self):
-        trip = self.make_trip()
-        ari = self.person(trip, "Ari")
-        bea = self.person(trip, "Bea")
-        cam = self.person(trip, "Cam")
-        ari.beer_chip_millis = 9500
-        bea.beer_chip_millis = 12000
-        cam.beer_chip_millis = 12000
-        ari.save(update_fields=["beer_chip_millis"])
-        bea.save(update_fields=["beer_chip_millis"])
-        cam.save(update_fields=["beer_chip_millis"])
-
-        leaderboard = chip_leaderboard(trip)
-
-        self.assertEqual(
-            [(entry["name"], entry["chip_balance"]) for entry in leaderboard],
-            [("Bea", "12"), ("Cam", "12"), ("Ari", "9.5")],
-        )
-
-    def test_chip_holdings_history_records_opening_and_daily_grant_balances(self):
-        trip = self.make_trip()
-        self.person(trip, "Ari")
-
-        grant_daily_beercoins(date(2026, 7, 1))
-
-        history = chip_holdings_history(trip)
-        self.assertEqual(history[0]["name"], "Ari")
-        self.assertEqual(
-            [point["balance_millis"] for point in history[0]["points"]],
-            [10000, 20000],
-        )
-        self.assertEqual(
-            list(ChipBalanceEvent.objects.values_list("reason", flat=True)),
-            [ChipBalanceEvent.Reason.OPENING_BALANCE, ChipBalanceEvent.Reason.DAILY_GRANT],
-        )
-
-    def test_market_performance_uses_only_settled_markets_and_ranks_final_net_results(self):
-        trip = self.make_trip()
-        ari = self.person(trip, "Ari")
-        bea = self.person(trip, "Bea")
-        cam = self.person(trip, "Cam")
-        settled_yes = Market.objects.create(trip=trip, question="Settled yes", resolved_outcome=Market.Outcome.YES)
-        settled_no = Market.objects.create(trip=trip, question="Settled no", resolved_outcome=Market.Outcome.NO)
-        open_market = Market.objects.create(trip=trip, question="Open")
-        MarketTrade.objects.bulk_create([
-            MarketTrade(market=settled_yes, participant=ari, outcome="yes", chips=3, cost_millis=3000, shares_millis=6000),
-            MarketTrade(market=settled_yes, participant=bea, outcome="no", chips=5, cost_millis=5000, shares_millis=1000),
-            MarketTrade(market=settled_no, participant=ari, outcome="yes", chips=2, cost_millis=2000, shares_millis=1000),
-            MarketTrade(market=settled_no, participant=bea, outcome="no", chips=1, cost_millis=1000, shares_millis=4000),
-            MarketTrade(market=open_market, participant=cam, outcome="yes", chips=9, cost_millis=9000, shares_millis=18000),
-        ])
-
-        performance = market_performance(trip)
-
-        self.assertEqual([(entry["name"], entry["net"], entry["wins"], entry["losses"]) for entry in performance["entries"]], [
-            ("Ari", "+1", 1, 1),
-            ("Bea", "-2", 1, 1),
-        ])
-        self.assertEqual(performance["entries"][0]["spent"], "5")
-        self.assertEqual(performance["entries"][0]["payout"], "6")
-        self.assertEqual(performance["biggest_winner"]["name"], "Ari")
-        self.assertEqual(performance["biggest_loser"]["name"], "Bea")
-
-    def test_market_performance_orders_tied_break_even_entries_by_name_and_has_no_highlights(self):
-        trip = self.make_trip()
-        bea = self.person(trip, "Bea")
-        ari = self.person(trip, "Ari")
-        market = Market.objects.create(trip=trip, question="Even", resolved_outcome=Market.Outcome.YES)
-        MarketTrade.objects.bulk_create([
-            MarketTrade(market=market, participant=bea, outcome="yes", chips=2, cost_millis=2000, shares_millis=2000),
-            MarketTrade(market=market, participant=ari, outcome="yes", chips=2, cost_millis=2000, shares_millis=2000),
-        ])
-
-        performance = market_performance(trip)
-
-        self.assertEqual([(entry["name"], entry["net"], entry["wins"], entry["losses"]) for entry in performance["entries"]], [
-            ("Ari", "0", 0, 0),
-            ("Bea", "0", 0, 0),
-        ])
-        self.assertIsNone(performance["biggest_winner"])
-        self.assertIsNone(performance["biggest_loser"])
-
-
-class LeaderboardPageTests(TestCase, TripFactoryMixin):
-    def test_leaderboard_page_shows_score_breakdown_and_back_link(self):
-        trip = self.make_trip()
-        ari = self.person(trip, "Ari")
-        proposal = Proposal.objects.create(trip=trip, submitted_by=ari, type="destination", title="Sicily")
-        ProposalVote.objects.create(proposal=proposal, participant=ari)
-        response = self.client.get(reverse("leaderboard", args=[trip.public_id]))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Beer Karma")
-        self.assertContains(response, "Ari")
-        self.assertContains(response, "1 post")
-        self.assertContains(response, "1 upvote")
-        self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
-
-    def test_chip_leaderboard_page_shows_balances_and_back_link(self):
-        trip = self.make_trip()
-        ari = self.person(trip, "Ari")
-        ari.beer_chip_millis = 7500
-        ari.save(update_fields=["beer_chip_millis"])
-
-        response = self.client.get(reverse("chip_leaderboard", args=[trip.public_id]))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Beer Chips")
-        self.assertContains(response, "7.5 chips")
-        self.assertContains(response, 'id="chip-history-chart"')
-        self.assertContains(response, "Market performance")
-        self.assertContains(response, "No settled share-market trades yet")
-        self.assertContains(response, 'src="/static/scheduler/vendor/echarts.common.min.js"')
-        self.assertContains(response, 'src="/static/scheduler/chip_leaderboard.js"')
-        self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
-
-
-class BeerClickerTests(TestCase, TripFactoryMixin):
-    def setUp(self):
-        self.trip = self.make_trip()
-        self.participant = self.person(self.trip, "Maya")
-        self.click_url = reverse("beer_clicker_click_api", args=[self.trip.public_id])
-        self.convert_url = reverse("beer_clicker_convert_api", args=[self.trip.public_id])
-
-    def post_json(self, url, data):
-        return self.client.post(url, data=json.dumps(data), content_type="application/json")
-
-    def test_click_is_server_authoritative_and_rate_limited(self):
-        invalid = self.post_json(self.click_url, {})
-        first = self.post_json(self.click_url, {"name": "Maya"})
-        repeated = self.post_json(self.click_url, {"name": "Maya"})
-
-        self.assertEqual(invalid.status_code, 400)
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(first.json()["earned"], 1)
-        self.assertEqual(repeated.status_code, 429)
-        account = ClickerAccount.objects.get(participant=self.participant)
-        self.assertEqual((account.balance, account.lifetime_earned), (1, 1))
-        self.participant.refresh_from_db()
-        self.assertEqual(self.participant.beer_chip_millis, 10_000)
-        self.assertFalse(ChipBalanceEvent.objects.filter(reason=ChipBalanceEvent.Reason.CLICKER_CONVERSION).exists())
-
-    def test_click_service_rejects_rapid_click_without_changing_balances(self):
-        now = timezone.now()
-        _participant, first_account, first_retry = award_clicker_click(self.participant, now=now)
-        _participant, repeated_account, repeated_retry = award_clicker_click(self.participant, now=now + timedelta(milliseconds=50))
-
-        self.assertIsNone(first_retry)
-        self.assertIsNotNone(repeated_retry)
-        self.assertEqual(first_account.pk, repeated_account.pk)
-        repeated_account.refresh_from_db()
-        self.assertEqual((repeated_account.balance, repeated_account.lifetime_earned), (1, 1))
-
-    def test_conversion_enforces_daily_cap_and_is_idempotent_on_repeat(self):
-        ClickerAccount.objects.create(participant=self.participant, balance=600, lifetime_earned=600)
-        conversion_day = date(2026, 7, 1)
-
-        participant, account, conversion, credited = convert_clicker_currency(self.participant, conversion_day)
-        participant, account, repeated_conversion, repeated_credit = convert_clicker_currency(self.participant, conversion_day)
-
-        self.assertEqual(credited, 5_000)
-        self.assertEqual(repeated_credit, 0)
-        self.assertEqual(conversion.pk, repeated_conversion.pk)
-        account.refresh_from_db()
-        participant.refresh_from_db()
-        self.assertEqual((account.balance, account.lifetime_earned), (100, 600))
-        self.assertEqual(participant.beer_chip_millis, 15_000)
-        self.assertEqual((conversion.clicker_spent, conversion.beer_chip_millis), (500, 5_000))
-        self.assertEqual(ClickerDailyConversion.objects.count(), 1)
-        self.assertEqual(
-            ChipBalanceEvent.objects.filter(reason=ChipBalanceEvent.Reason.CLICKER_CONVERSION).count(),
-            1,
-        )
-
-    def test_conversion_endpoint_reports_a_noop_after_the_daily_cap(self):
-        ClickerAccount.objects.create(participant=self.participant, balance=500, lifetime_earned=500)
-
-        first = self.post_json(self.convert_url, {"name": "Maya"})
-        repeated = self.post_json(self.convert_url, {"name": "Maya"})
-
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(first.json()["credited_millis"], 5_000)
-        self.assertEqual(repeated.status_code, 200)
-        self.assertEqual(repeated.json()["credited_millis"], 0)
-        self.assertEqual(repeated.json()["account"]["remaining_daily_conversion_millis"], 0)
-
-    def test_clicker_leaderboard_orders_lifetime_then_balance_then_name(self):
-        ari = self.person(self.trip, "Ari")
-        bea = self.person(self.trip, "Bea")
-        ClickerAccount.objects.create(participant=self.participant, balance=8, lifetime_earned=50)
-        ClickerAccount.objects.create(participant=ari, balance=9, lifetime_earned=50)
-        ClickerAccount.objects.create(participant=bea, balance=100, lifetime_earned=40)
-
-        leaderboard = clicker_leaderboard(self.trip)
-
-        self.assertEqual(
-            [(entry["name"], entry["lifetime_earned"], entry["clicker_balance"]) for entry in leaderboard],
-            [("Ari", 50, 9), ("Maya", 50, 8), ("Bea", 40, 100)],
-        )
-
-    def test_clicker_page_uses_the_shared_navigation_and_script(self):
-        response = self.client.get(reverse("beer_clicker", args=[self.trip.public_id]))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Beer-clicker")
-        self.assertContains(response, 'src="/static/scheduler/beer_clicker.js"')
-        self.assertContains(response, reverse("beermarket", args=[self.trip.public_id]))
-        self.assertContains(response, reverse("chip_leaderboard", args=[self.trip.public_id]))
-
-class BeermarketTests(TestCase, TripFactoryMixin):
-    def setUp(self):
-        self.trip = self.make_trip()
-        self.market = Market.objects.create(trip=self.trip, question="Will Kai join the trip planning?")
-        self.url = reverse("market_trade_api", args=[self.trip.public_id, self.market.id])
-
-    def post_json(self, data):
-        return self.client.post(self.url, data=json.dumps(data), content_type="application/json")
-
-    def test_new_share_markets_seed_from_trip_chip_economy(self):
-        trip = self.make_trip(title="Bigger bankroll")
-        for index in range(8):
-            participant = self.person(trip, f"Trader {index}")
-            participant.beer_chip_millis = 100000
-            participant.save(update_fields=["beer_chip_millis"])
-
-        market = Market.objects.create(trip=trip, question="Will liquidity scale?")
-
-        self.assertEqual(market.seed_chips, 50)
-
-    def test_middle_seed_keeps_normal_bet_price_impact_visible(self):
-        shallow = Market.objects.create(trip=self.trip, question="Shallow", seed_chips=10)
-        seeded = Market.objects.create(trip=self.trip, question="Seeded", seed_chips=50)
-        shallow_shares = shallow.shares_for_cost([], Market.Outcome.YES, 10000)
-        seeded_shares = seeded.shares_for_cost([], Market.Outcome.YES, 10000)
-
-        shallow_yes_price = shallow.share_market_state([
-            MarketTrade(
-                market=shallow,
-                participant=self.person(self.trip, "Shallow Buyer"),
-                outcome="yes",
-                chips=10,
-                shares_millis=shallow_shares,
-            )
-        ])[2]
-        seeded_yes_price = seeded.share_market_state([
-            MarketTrade(
-                market=seeded,
-                participant=self.person(self.trip, "Seeded Buyer"),
-                outcome="yes",
-                chips=10,
-                shares_millis=seeded_shares,
-            )
-        ])[2]
-
-        self.assertGreater(round(shallow_yes_price * 100), 70)
-        self.assertGreater(round(seeded_yes_price * 100), 55)
-        self.assertLess(round(seeded_yes_price * 100), 65)
-
-    def test_first_trade_raises_untraded_market_seed_from_current_trip_economy(self):
-        market = Market.objects.create(trip=self.trip, question="Created before bankroll")
-        trader = self.person(self.trip, "Maya")
-        trader.beer_chip_millis = 100000
-        trader.save(update_fields=["beer_chip_millis"])
-        url = reverse("market_trade_api", args=[self.trip.public_id, market.id])
-
-        response = self.client.post(
-            url,
-            data=json.dumps({"name": "Maya", "outcome": "yes", "chips": 10}),
-            content_type="application/json",
-        )
-
-        market.refresh_from_db()
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(market.seed_chips, 50)
-
-    def test_trade_deducts_chips_and_updates_market_odds_history(self):
-        first = self.post_json({"name": "Maya", "outcome": "yes", "chips": 3})
-        self.assertEqual(first.status_code, 200)
-        participant = Participant.objects.get()
-        self.assertEqual(participant.beer_chip_millis, 7000)
-        self.assertEqual(participant.chip_balance_events.last().reason, ChipBalanceEvent.Reason.MARKET_TRADE)
-        self.assertEqual(MarketTrade.objects.get().outcome, "yes")
-        self.assertEqual(MarketTrade.objects.get().entry_odds, 50)
-        market = first.json()["results"]["markets"][0]
-        self.assertGreater(market["yes_odds"], 50)
-        self.assertEqual(len(market["odds_history"]), 2)
-        self.assertEqual(market["positions"][0]["name"], "Maya")
-        self.assertEqual(market["positions"][0]["cost_millis"], 3000)
-        trade = MarketTrade.objects.get()
-        self.assertEqual(
-            market["positions"][0]["yes_entry_odds"],
-            round(trade.cost_millis / trade.shares_millis * 100),
-        )
-        self.assertGreater(market["positions"][0]["yes_entry_odds"], 50)
-        self.assertGreater(market["positions"][0]["yes_shares_millis"], 3000)
-
-    def test_position_entry_odds_use_average_fill_price_per_side(self):
-        yes_response = self.post_json({"name": "Maya", "outcome": "yes", "chips": 3})
-        self.assertEqual(yes_response.status_code, 200)
-        no_response = self.post_json({"name": "Maya", "outcome": "no", "chips": 2})
-        self.assertEqual(no_response.status_code, 200)
-
-        market = no_response.json()["results"]["markets"][0]
-        position = market["positions"][0]
-        yes_trade = MarketTrade.objects.get(outcome=Market.Outcome.YES)
-        no_trade = MarketTrade.objects.get(outcome=Market.Outcome.NO)
-
-        self.assertEqual(position["cost_millis"], 5000)
-        self.assertEqual(
-            position["yes_entry_odds"],
-            round(yes_trade.cost_millis / yes_trade.shares_millis * 100),
-        )
-        self.assertEqual(
-            position["no_entry_odds"],
-            round(no_trade.cost_millis / no_trade.shares_millis * 100),
-        )
-
-    def test_resolution_pays_the_pool_to_winners_and_locks_the_market(self):
-        maya = self.person(self.trip, "Maya")
-        ari = self.person(self.trip, "Ari")
-        maya.beer_chip_millis = 7000
-        ari.beer_chip_millis = 8000
-        maya.save(update_fields=["beer_chip_millis"])
-        ari.save(update_fields=["beer_chip_millis"])
-        MarketTrade.objects.create(market=self.market, participant=maya, outcome="yes", chips=3)
-        MarketTrade.objects.create(market=self.market, participant=ari, outcome="no", chips=2)
-
-        self.assertEqual(self.market.resolve(Market.Outcome.YES), 1)
-        maya.refresh_from_db()
-        ari.refresh_from_db()
-        self.assertEqual(maya.beer_karma_bonus, 1)
-        self.assertEqual(ari.beer_karma_bonus, 0)
-        self.assertEqual(maya.beer_chip_millis, 10000)
-        self.assertEqual(ari.beer_chip_millis, 8000)
-        self.assertEqual(maya.chip_balance_events.last().reason, ChipBalanceEvent.Reason.MARKET_PAYOUT)
-        self.assertTrue(self.market.is_resolved)
-
-        rejected = self.post_json({"name": "Maya", "outcome": "no", "chips": 1})
-        self.assertEqual(rejected.status_code, 400)
-        participants = {participant["name"]: participant for participant in trip_results(self.trip)["participants"]}
-        self.assertEqual(participants["Maya"]["beer_karma"], 1)
 
 class ProposalApiTests(TestCase, TripFactoryMixin):
     def setUp(self):
@@ -927,3 +489,100 @@ class AvailabilityApiTests(TestCase, TripFactoryMixin):
         response = self.client.post(url, data=json.dumps({"name": "Kei", "minimum_attendance_days": 4}), content_type="application/json")
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Participant.objects.count(), 1)
+
+
+class CleanTripTests(TestCase, TripFactoryMixin):
+    def test_trip_page_and_results_only_expose_planning_features(self):
+        trip = self.make_trip()
+        participant = self.person(trip, "Maya", {trip.start_date: "available"})
+        response = self.client.get(reverse("trip_detail", args=[trip.public_id]))
+        self.assertContains(response, reverse("home"))
+        self.assertContains(response, reverse("trip_detail", args=[trip.public_id]))
+        self.assertContains(response, "Trip ideas")
+        for label in ("Beermarket", "Beer-clicker", "Karma", "Chips"):
+            self.assertNotContains(response, label)
+
+        results = self.client.get(reverse("results_api", args=[trip.public_id])).json()["results"]
+        self.assertEqual(set(results), {"daily", "windows", "active_participant_count", "participants", "proposals"})
+        self.assertEqual(results["participants"], [{
+            "id": participant.id,
+            "name": "Maya",
+            "is_active": True,
+            "minimum_attendance_days": 1,
+            "availability": {"2026-07-01": "available"},
+        }])
+
+    def test_removed_pages_and_apis_return_404(self):
+        trip = self.make_trip()
+        for suffix in (
+            "beermarket/", "beer-clicker/", "leaderboard/", "chip-leaderboard/",
+            "api/beer-clicker/status/", "api/beer-clicker/click/",
+            "api/beer-clicker/convert/", "api/markets/1/trade/",
+        ):
+            for method in ("get", "post"):
+                with self.subTest(suffix=suffix, method=method):
+                    response = getattr(self.client, method)(f"/trips/{trip.public_id}/{suffix}")
+                    self.assertEqual(response.status_code, 404)
+        self.assertEqual(Participant.objects.count(), 0)
+
+
+class CleanupMigrationTests(TransactionTestCase):
+    def test_upgrade_preserves_all_planning_records_and_removes_game_schema(self):
+        old_targets = [
+            ("scheduler", "0015_alter_market_seed_chips"),
+            ("world_cup", "0001_initial"),
+        ]
+        executor = MigrationExecutor(connection)
+        latest_targets = executor.loader.graph.leaf_nodes()
+        self.addCleanup(lambda: MigrationExecutor(connection).migrate(latest_targets))
+        executor.migrate(old_targets)
+        old_apps = executor.loader.project_state(old_targets).apps
+        def old(name):
+            return old_apps.get_model("scheduler", name)
+
+        trip = old("Trip").objects.create(
+            title="Existing trip", destination="Istria",
+            start_date=date(2026, 7, 1), end_date=date(2026, 7, 5),
+            minimum_duration_days=2, ideal_duration_days=3, maximum_duration_days=4,
+        )
+        person = old("Participant").objects.create(
+            trip=trip, name="Maya", normalized_name="maya", minimum_attendance_days=2,
+            beer_chip_millis=42000, beer_chips=42, beer_karma_bonus=7,
+        )
+        old("Availability").objects.create(participant=person, date=trip.start_date, status="available")
+        proposal = old("Proposal").objects.create(
+            trip=trip, submitted_by=person, type="stay", title="Villa",
+            total_price="3200.00", currency="EUR", sleeps=8, bedrooms=4,
+        )
+        old("ProposalVote").objects.create(proposal=proposal, participant=person)
+        old("ProposalBookingInterest").objects.create(proposal=proposal, participant=person)
+        market = old("Market").objects.create(trip=trip, question="Will we go?")
+        old("MarketTrade").objects.create(market=market, participant=person, outcome="yes", chips=3)
+        old("ChipBalanceEvent").objects.create(
+            participant=person, amount_millis=42000, balance_after_millis=42000, reason="opening_balance",
+        )
+        old("ClickerAccount").objects.create(participant=person, balance=100, lifetime_earned=100)
+        old("ClickerDailyConversion").objects.create(participant=person, conversion_date=trip.start_date)
+        old("DailyBeercoinGrant").objects.create(grant_date=trip.start_date)
+        fixture = old_apps.get_model("world_cup", "WorldCupFixture").objects.create(
+            provider_fixture_id=1, home_team="A", away_team="B", kickoff_at=trip.created_at, status="scheduled",
+        )
+        old_apps.get_model("world_cup", "WorldCupMarket").objects.create(fixture=fixture, market=market, trip=trip)
+        planning_models = (Trip, Participant, Availability, Proposal, ProposalVote, ProposalBookingInterest)
+        snapshots = {
+            model.__name__: list(old(model.__name__).objects.values(*[f.attname for f in model._meta.fields]))
+            for model in planning_models
+        }
+
+        MigrationExecutor(connection).migrate(latest_targets)
+
+        for model in planning_models:
+            with self.subTest(model=model.__name__):
+                self.assertEqual(list(model.objects.values()), snapshots[model.__name__])
+        tables = set(connection.introspection.table_names())
+        for name in ("market", "markettrade", "chipbalanceevent", "clickeraccount", "clickerdailyconversion", "dailybeercoingrant"):
+            self.assertNotIn(f"scheduler_{name}", tables)
+        self.assertFalse(any(name.startswith("world_cup_") for name in tables))
+        self.assertEqual(Participant.objects.create(trip_id=trip.id, name=" New person ").normalized_name, "new person")
+        results = trip_results(Trip.objects.get(pk=trip.id))
+        self.assertEqual(results["proposals"][0]["booking_names"], ["Maya"])

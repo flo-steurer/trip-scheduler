@@ -79,7 +79,6 @@
     <div class="collapsible-content">
       <span id="proposal-state" class="save-state" aria-live="polite"></span>
       <p class="help">Add a destination, villa, or any other idea. For villas, add the optional details to compare cost, capacity, and booking interest.</p>
-      <div class="leaderboard-links"><a class="karma-link" href="{% url 'leaderboard' trip.public_id %}">Check the Beer Karma leaderboard <span aria-hidden="true">→</span></a><a class="karma-link" href="{% url 'chip_leaderboard' trip.public_id %}">Check the Chip leaderboard <span aria-hidden="true">→</span></a></div>
       <form id="proposal-form" class="proposal-form">
         <label>Idea type<select id="proposal-type" required><option value="destination">Destination</option><option value="stay">Villa / stay</option><option value="other">Other idea</option></select></label>
         <p id="proposal-type-hint" class="proposal-type-hint" aria-live="polite"></p>

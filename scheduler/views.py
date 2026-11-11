@@ -14,20 +14,8 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import TripForm
-from .models import Availability, ChipBalanceEvent, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
-from .services import (
-    award_clicker_click,
-    chip_holdings_history,
-    chip_leaderboard,
-    clicker_leaderboard,
-    clicker_status,
-    convert_clicker_currency,
-    idea_leaderboard,
-    market_performance,
-    trip_results,
-)
-from world_cup.models import WorldCupMarket
-from world_cup.services import materialize_world_cup_markets_for_trip
+from .models import Availability, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
+from .services import trip_results
 
 
 activity_logger = logging.getLogger("scheduler.activity")
@@ -83,7 +71,6 @@ def _participant_payload(participant):
         "id": participant.id,
         "name": participant.name,
         "minimum_attendance_days": participant.minimum_attendance_days,
-        "beer_chip_millis": participant.beer_chip_millis,
     }
 
 
@@ -164,7 +151,6 @@ def create_trip(request):
     form = TripForm(request.POST)
     if form.is_valid():
         trip = form.save()
-        materialize_world_cup_markets_for_trip(trip)
         return redirect("trip_detail", public_id=trip.public_id)
     return render(request, "scheduler/home.html", {"form": form}, status=400)
 
@@ -179,109 +165,6 @@ def trip_detail(request, public_id):
         "initial_results": trip_results(trip),
         "share_url": share_url,
     })
-
-
-@require_GET
-def leaderboard(request, public_id):
-    trip = _trip(public_id)
-    return render(request, "scheduler/leaderboard.html", {
-        "trip": trip,
-        "leaderboard": idea_leaderboard(trip),
-    })
-
-
-@require_GET
-def chip_leaderboard_view(request, public_id):
-    trip = _trip(public_id)
-    return render(request, "scheduler/chip_leaderboard.html", {
-        "trip": trip,
-        "leaderboard": chip_leaderboard(trip),
-        "chip_holdings_history": chip_holdings_history(trip),
-        "market_performance": market_performance(trip),
-    })
-
-
-@require_GET
-def beermarket(request, public_id):
-    trip = _trip(public_id)
-    return render(request, "scheduler/beermarket.html", {
-        "trip": trip,
-        "initial_results": trip_results(trip),
-    })
-
-
-@require_GET
-def beer_clicker(request, public_id):
-    trip = _trip(public_id)
-    return render(request, "scheduler/beer_clicker.html", {
-        "trip": trip,
-        "leaderboard": clicker_leaderboard(trip),
-    })
-
-
-def _clicker_response(trip, participant, account=None, **extra):
-    payload = {
-        "account": clicker_status(participant, account=account),
-        "leaderboard": clicker_leaderboard(trip),
-    }
-    payload.update(extra)
-    return JsonResponse(payload)
-
-
-@require_POST
-def beer_clicker_status_api(request, public_id):
-    trip = _trip(public_id)
-    body = _json_body(request)
-    if body is None:
-        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
-    participant, error = _participant_for_name(trip, body.get("name"))
-    if error:
-        return JsonResponse({"error": error}, status=400)
-    _activity(request, participant, "beer_clicker_opened")
-    return _clicker_response(trip, participant)
-
-
-@require_POST
-def beer_clicker_click_api(request, public_id):
-    trip = _trip(public_id)
-    body = _json_body(request)
-    if body is None:
-        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
-    participant, error = _participant_for_name(trip, body.get("name"))
-    if error:
-        return JsonResponse({"error": error}, status=400)
-    participant, account, retry_after = award_clicker_click(participant)
-    if retry_after is not None:
-        response = _clicker_response(
-            trip,
-            participant,
-            account,
-            error="Beer needs a moment. Try again shortly.",
-            retry_after_ms=max(1, round(retry_after * 1000)),
-        )
-        response.status_code = 429
-        return response
-    _activity(request, participant, "beer_clicker_clicked")
-    return _clicker_response(trip, participant, account, earned=1)
-
-
-@require_POST
-def beer_clicker_convert_api(request, public_id):
-    trip = _trip(public_id)
-    body = _json_body(request)
-    if body is None:
-        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
-    participant, error = _participant_for_name(trip, body.get("name"))
-    if error:
-        return JsonResponse({"error": error}, status=400)
-    participant, account, _conversion, credited_millis = convert_clicker_currency(participant)
-    _activity(request, participant, "beer_clicker_converted" if credited_millis else "beer_clicker_conversion_noop")
-    return _clicker_response(
-        trip,
-        participant,
-        account,
-        credited_millis=credited_millis,
-    )
 
 
 @require_POST
@@ -462,67 +345,4 @@ def proposal_booking_interest_api(request, public_id, proposal_id):
         ProposalBookingInterest.objects.create(proposal=proposal, participant=participant)
         action = "proposal_booking_interest_added"
     _activity(request, participant, action)
-    return _results_response(trip, participant=_participant_payload(participant))
-
-
-@require_POST
-def market_trade_api(request, public_id, market_id):
-    trip = _trip(public_id)
-    market = get_object_or_404(Market, trip=trip, pk=market_id)
-    body = _json_body(request)
-    if body is None:
-        return JsonResponse({"error": "Expected a JSON request body."}, status=400)
-    participant, error = _participant_for_name(trip, body.get("name"))
-    if error:
-        return JsonResponse({"error": error}, status=400)
-    outcome = body.get("outcome")
-    if outcome not in Market.Outcome.values:
-        return JsonResponse({"error": "Choose Yes or No."}, status=400)
-    chips = body.get("chips")
-    if isinstance(chips, bool):
-        return JsonResponse({"error": "Choose a valid Beer Chip amount."}, status=400)
-    try:
-        chip_millis_decimal = Decimal(str(chips)) * Market.SHARE_SCALE
-        chip_millis = int(chip_millis_decimal)
-    except (InvalidOperation, TypeError, ValueError):
-        return JsonResponse({"error": "Choose a valid Beer Chip amount."}, status=400)
-    if chip_millis_decimal != chip_millis or chip_millis < 1:
-        return JsonResponse({"error": "Spend at least 0.001 Beer Chips."}, status=400)
-    with transaction.atomic():
-        market = Market.objects.select_for_update().get(trip=trip, pk=market_id)
-        participant = Participant.objects.select_for_update().get(pk=participant.pk)
-        if market.is_resolved:
-            return JsonResponse({"error": "This Beermarket has already been resolved."}, status=400)
-        world_cup_market = WorldCupMarket.objects.select_related("fixture").filter(market=market).first()
-        if world_cup_market and not world_cup_market.fixture.is_tradeable:
-            return JsonResponse({"error": "This World Cup market is no longer accepting trades."}, status=400)
-        if chip_millis > participant.beer_chip_millis:
-            return JsonResponse({"error": "You do not have that many Beer Chips."}, status=400)
-        existing_trades = list(market.trades.all())
-        if not existing_trades:
-            seed_chips = Market.seed_chips_for_trip(trip)
-            if market.seed_chips < seed_chips:
-                market.seed_chips = seed_chips
-                market.save(update_fields=["seed_chips"])
-        _yes_shares, _no_shares, yes_price = market.share_market_state(existing_trades)
-        entry_odds = round((yes_price if outcome == Market.Outcome.YES else 1 - yes_price) * 100)
-        shares_millis = market.shares_for_cost(existing_trades, outcome, chip_millis)
-        participant.beer_chip_millis -= chip_millis
-        participant.save(update_fields=["beer_chip_millis"])
-        ChipBalanceEvent.objects.create(
-            participant=participant,
-            amount_millis=-chip_millis,
-            balance_after_millis=participant.beer_chip_millis,
-            reason=ChipBalanceEvent.Reason.MARKET_TRADE,
-        )
-        MarketTrade.objects.create(
-            market=market,
-            participant=participant,
-            outcome=outcome,
-            chips=max(1, chip_millis // Market.SHARE_SCALE),
-            entry_odds=entry_odds,
-            cost_millis=chip_millis,
-            shares_millis=shares_millis,
-        )
-    _activity(request, participant, f"market_trade_bought_{outcome}_{chip_millis}")
     return _results_response(trip, participant=_participant_payload(participant))
