@@ -1,10 +1,9 @@
 import uuid
-from collections import defaultdict
 from datetime import date
-from math import ceil, exp, log
+from math import ceil
 
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import models
 from django.utils import timezone
 
 
@@ -308,79 +307,22 @@ class Market(models.Model):
             self.seed_chips = self.seed_chips_for_trip(self.trip)
         super().save(*args, **kwargs)
 
-    @staticmethod
-    def _lmsr_cost(yes_shares_millis, no_shares_millis, liquidity):
-        yes = yes_shares_millis / Market.SHARE_SCALE
-        no = no_shares_millis / Market.SHARE_SCALE
-        maximum = max(yes, no)
-        return maximum + liquidity * log(exp((yes - maximum) / liquidity) + exp((no - maximum) / liquidity))
-
     def share_market_state(self, trades):
-        yes_shares = sum((trade.shares_millis if trade.shares_millis is not None else trade.chips * self.SHARE_SCALE) for trade in trades if trade.outcome == self.Outcome.YES)
-        no_shares = sum((trade.shares_millis if trade.shares_millis is not None else trade.chips * self.SHARE_SCALE) for trade in trades if trade.outcome == self.Outcome.NO)
-        liquidity = max(self.seed_chips, 1)
-        yes_price = 1 / (1 + exp((no_shares - yes_shares) / self.SHARE_SCALE / liquidity))
-        return yes_shares, no_shares, yes_price
+        from .beermarket import share_market_state
+
+        return share_market_state(self, trades)
 
     def shares_for_cost(self, trades, outcome, cost_millis):
-        yes_shares, no_shares, _yes_price = self.share_market_state(trades)
-        liquidity = max(self.seed_chips, 1)
-        starting_cost = self._lmsr_cost(yes_shares, no_shares, liquidity)
-        target_cost = starting_cost + cost_millis / self.SHARE_SCALE
-        low, high = 0.0, max(cost_millis / self.SHARE_SCALE * 2, 1.0)
-        while self._lmsr_cost(
-            yes_shares + (int(high * self.SHARE_SCALE) if outcome == self.Outcome.YES else 0),
-            no_shares + (int(high * self.SHARE_SCALE) if outcome == self.Outcome.NO else 0),
-            liquidity,
-        ) < target_cost:
-            high *= 2
-        for _ in range(48):
-            middle = (low + high) / 2
-            shares_millis = int(middle * self.SHARE_SCALE)
-            new_cost = self._lmsr_cost(
-                yes_shares + (shares_millis if outcome == self.Outcome.YES else 0),
-                no_shares + (shares_millis if outcome == self.Outcome.NO else 0),
-                liquidity,
-            )
-            if new_cost <= target_cost:
-                low = middle
-            else:
-                high = middle
-        return max(int(low * self.SHARE_SCALE), 1)
+        from .beermarket import shares_for_cost
+
+        return shares_for_cost(self, trades, outcome, cost_millis)
 
     def resolve(self, outcome):
-        if outcome not in self.Outcome.values:
-            raise ValidationError("Choose a valid market outcome.")
-        with transaction.atomic():
-            market = type(self).objects.select_for_update().get(pk=self.pk)
-            if market.is_resolved:
-                raise ValidationError("This market has already been resolved.")
-            trades = list(market.trades.select_for_update().all())
-            payouts = defaultdict(int)
-            for trade in trades:
-                if trade.outcome == outcome:
-                    payouts[trade.participant_id] += (
-                        trade.shares_millis
-                        if trade.shares_millis is not None
-                        else trade.chips * self.SHARE_SCALE
-                    )
-            for participant_id, payout in payouts.items():
-                participant = Participant.objects.select_for_update().get(pk=participant_id)
-                participant.beer_chip_millis += payout
-                participant.beer_karma_bonus += 1
-                participant.save(update_fields=["beer_chip_millis", "beer_karma_bonus"])
-                ChipBalanceEvent.objects.create(
-                    participant=participant,
-                    amount_millis=payout,
-                    balance_after_millis=participant.beer_chip_millis,
-                    reason=ChipBalanceEvent.Reason.MARKET_PAYOUT,
-                )
-            market.resolved_outcome = outcome
-            market.resolved_at = timezone.now()
-            market.save(update_fields=["resolved_outcome", "resolved_at"])
-        self.resolved_outcome = market.resolved_outcome
-        self.resolved_at = market.resolved_at
-        return len(payouts)
+        from .beermarket import settle_market
+
+        awarded = settle_market(market_id=self.pk, outcome=outcome)
+        self.refresh_from_db(fields=["resolved_outcome", "resolved_at"])
+        return awarded
 
     def __str__(self):
         return self.question

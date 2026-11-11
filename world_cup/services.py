@@ -4,6 +4,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from scheduler.beermarket import settle_market
 from scheduler.models import Market, Trip
 
 from .models import WorldCupFixture, WorldCupMarket
@@ -92,7 +93,7 @@ def settle_fixture_markets(fixture):
     for world_cup_market in WorldCupMarket.objects.filter(fixture=fixture).select_related("market"):
         if world_cup_market.market.is_resolved:
             continue
-        world_cup_market.market.resolve(outcome)
+        settle_market(market_id=world_cup_market.market_id, outcome=outcome)
         settled += 1
     return settled
 

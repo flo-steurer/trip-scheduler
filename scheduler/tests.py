@@ -9,8 +9,10 @@ from django.urls import reverse
 from django.utils import timezone
 from django.contrib.staticfiles import finders
 
+from .beermarket import BeermarketError, place_trade, project_trip_markets, settle_market
 from .models import Availability, ChipBalanceEvent, ClickerAccount, ClickerDailyConversion, DailyBeercoinGrant, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
 from .services import award_clicker_click, chip_holdings_history, chip_leaderboard, clicker_leaderboard, convert_clicker_currency, grant_daily_beercoins, idea_leaderboard, market_performance, trip_results
+from world_cup.models import WorldCupFixture, WorldCupMarket
 
 
 class TripFactoryMixin:
@@ -613,6 +615,87 @@ class BeermarketTests(TestCase, TripFactoryMixin):
     def post_json(self, data):
         return self.client.post(self.url, data=json.dumps(data), content_type="application/json")
 
+    def test_place_trade_owns_share_trade_accounting(self):
+        receipt = place_trade(
+            trip_public_id=self.trip.public_id,
+            market_id=self.market.id,
+            participant_name=" Maya ",
+            outcome=Market.Outcome.YES,
+            chips="3",
+        )
+
+        participant = Participant.objects.get(name="Maya")
+        trade = MarketTrade.objects.get()
+        self.assertEqual(receipt.participant, participant)
+        self.assertEqual(receipt.trade, trade)
+        self.assertEqual(receipt.cost_millis, 3000)
+        self.assertEqual(receipt.balance_after_millis, 7000)
+        self.assertEqual(participant.beer_chip_millis, 7000)
+        self.assertEqual(trade.cost_millis, 3000)
+        self.assertIsNotNone(trade.shares_millis)
+        self.assertGreater(trade.shares_millis, 3000)
+        self.assertEqual(participant.chip_balance_events.last().reason, ChipBalanceEvent.Reason.MARKET_TRADE)
+        self.assertEqual(receipt.activity_action, "market_trade_bought_yes_3000")
+
+    def test_place_trade_rejects_invalid_inputs_with_public_messages(self):
+        cases = [
+            ({"participant_name": "", "outcome": "yes", "chips": 1}, "Enter a name first."),
+            ({"participant_name": "Maya", "outcome": "maybe", "chips": 1}, "Choose Yes or No."),
+            ({"participant_name": "Maya", "outcome": "yes", "chips": True}, "Choose a valid Beer Chip amount."),
+            ({"participant_name": "Maya", "outcome": "yes", "chips": "bad"}, "Choose a valid Beer Chip amount."),
+            ({"participant_name": "Maya", "outcome": "yes", "chips": "0.0001"}, "Spend at least 0.001 Beer Chips."),
+        ]
+
+        for values, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaises(BeermarketError) as error:
+                    place_trade(trip_public_id=self.trip.public_id, market_id=self.market.id, **values)
+                self.assertEqual(error.exception.public_message, message)
+
+    def test_place_trade_rejects_overspending_resolved_and_non_tradeable_world_cup_markets(self):
+        poor = self.person(self.trip, "Poor")
+        poor.beer_chip_millis = 500
+        poor.save(update_fields=["beer_chip_millis"])
+        with self.assertRaises(BeermarketError) as overspending:
+            place_trade(
+                trip_public_id=self.trip.public_id,
+                market_id=self.market.id,
+                participant_name="Poor",
+                outcome=Market.Outcome.YES,
+                chips=1,
+            )
+        self.assertEqual(overspending.exception.public_message, "You do not have that many Beer Chips.")
+
+        self.market.resolved_outcome = Market.Outcome.YES
+        self.market.save(update_fields=["resolved_outcome"])
+        with self.assertRaises(BeermarketError) as resolved:
+            place_trade(
+                trip_public_id=self.trip.public_id,
+                market_id=self.market.id,
+                participant_name="Maya",
+                outcome=Market.Outcome.YES,
+                chips=1,
+            )
+        self.assertEqual(resolved.exception.public_message, "This Beermarket has already been resolved.")
+
+        fixture = WorldCupFixture.objects.create(
+            provider_fixture_id=44,
+            home_team="Austria",
+            away_team="Germany",
+            kickoff_at=timezone.now() - timedelta(minutes=1),
+        )
+        world_cup_market = Market.objects.create(trip=self.trip, question="Automatic")
+        WorldCupMarket.objects.create(fixture=fixture, market=world_cup_market, trip=self.trip)
+        with self.assertRaises(BeermarketError) as closed:
+            place_trade(
+                trip_public_id=self.trip.public_id,
+                market_id=world_cup_market.id,
+                participant_name="Maya",
+                outcome=Market.Outcome.YES,
+                chips=1,
+            )
+        self.assertEqual(closed.exception.public_message, "This World Cup market is no longer accepting trades.")
+
     def test_new_share_markets_seed_from_trip_chip_economy(self):
         trip = self.make_trip(title="Bigger bankroll")
         for index in range(8):
@@ -625,49 +708,48 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         self.assertEqual(market.seed_chips, 50)
 
     def test_middle_seed_keeps_normal_bet_price_impact_visible(self):
-        shallow = Market.objects.create(trip=self.trip, question="Shallow", seed_chips=10)
+        self.person(self.trip, "Shallow Buyer")
+        self.person(self.trip, "Seeded Buyer")
+        shallow = Market.objects.create(trip=self.trip, question="Shallow", seed_chips=25)
         seeded = Market.objects.create(trip=self.trip, question="Seeded", seed_chips=50)
-        shallow_shares = shallow.shares_for_cost([], Market.Outcome.YES, 10000)
-        seeded_shares = seeded.shares_for_cost([], Market.Outcome.YES, 10000)
 
-        shallow_yes_price = shallow.share_market_state([
-            MarketTrade(
-                market=shallow,
-                participant=self.person(self.trip, "Shallow Buyer"),
-                outcome="yes",
-                chips=10,
-                shares_millis=shallow_shares,
-            )
-        ])[2]
-        seeded_yes_price = seeded.share_market_state([
-            MarketTrade(
-                market=seeded,
-                participant=self.person(self.trip, "Seeded Buyer"),
-                outcome="yes",
-                chips=10,
-                shares_millis=seeded_shares,
-            )
-        ])[2]
+        place_trade(
+            trip_public_id=self.trip.public_id,
+            market_id=shallow.id,
+            participant_name="Shallow Buyer",
+            outcome=Market.Outcome.YES,
+            chips=10,
+        )
+        place_trade(
+            trip_public_id=self.trip.public_id,
+            market_id=seeded.id,
+            participant_name="Seeded Buyer",
+            outcome=Market.Outcome.YES,
+            chips=10,
+        )
 
-        self.assertGreater(round(shallow_yes_price * 100), 70)
-        self.assertGreater(round(seeded_yes_price * 100), 55)
-        self.assertLess(round(seeded_yes_price * 100), 65)
+        markets = {market["id"]: market for market in project_trip_markets(trip=self.trip)}
+
+        self.assertGreater(markets[shallow.id]["yes_odds"], markets[seeded.id]["yes_odds"])
+        self.assertGreater(markets[seeded.id]["yes_odds"], 55)
+        self.assertLess(markets[seeded.id]["yes_odds"], 65)
 
     def test_first_trade_raises_untraded_market_seed_from_current_trip_economy(self):
         market = Market.objects.create(trip=self.trip, question="Created before bankroll")
         trader = self.person(self.trip, "Maya")
         trader.beer_chip_millis = 100000
         trader.save(update_fields=["beer_chip_millis"])
-        url = reverse("market_trade_api", args=[self.trip.public_id, market.id])
 
-        response = self.client.post(
-            url,
-            data=json.dumps({"name": "Maya", "outcome": "yes", "chips": 10}),
-            content_type="application/json",
+        receipt = place_trade(
+            trip_public_id=self.trip.public_id,
+            market_id=market.id,
+            participant_name="Maya",
+            outcome=Market.Outcome.YES,
+            chips=10,
         )
 
         market.refresh_from_db()
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(receipt.cost_millis, 10000)
         self.assertEqual(market.seed_chips, 50)
 
     def test_trade_deducts_chips_and_updates_market_odds_history(self):
@@ -722,7 +804,7 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         MarketTrade.objects.create(market=self.market, participant=maya, outcome="yes", chips=3)
         MarketTrade.objects.create(market=self.market, participant=ari, outcome="no", chips=2)
 
-        self.assertEqual(self.market.resolve(Market.Outcome.YES), 1)
+        self.assertEqual(settle_market(market_id=self.market.id, outcome=Market.Outcome.YES), 1)
         maya.refresh_from_db()
         ari.refresh_from_db()
         self.assertEqual(maya.beer_karma_bonus, 1)
@@ -730,12 +812,23 @@ class BeermarketTests(TestCase, TripFactoryMixin):
         self.assertEqual(maya.beer_chip_millis, 10000)
         self.assertEqual(ari.beer_chip_millis, 8000)
         self.assertEqual(maya.chip_balance_events.last().reason, ChipBalanceEvent.Reason.MARKET_PAYOUT)
+        self.market.refresh_from_db()
         self.assertTrue(self.market.is_resolved)
 
         rejected = self.post_json({"name": "Maya", "outcome": "no", "chips": 1})
         self.assertEqual(rejected.status_code, 400)
         participants = {participant["name"]: participant for participant in trip_results(self.trip)["participants"]}
         self.assertEqual(participants["Maya"]["beer_karma"], 1)
+
+    def test_project_trip_markets_preserves_legacy_read_fallback_only(self):
+        maya = self.person(self.trip, "Maya")
+        MarketTrade.objects.create(market=self.market, participant=maya, outcome="yes", chips=3)
+
+        market = project_trip_markets(trip=self.trip)[0]
+
+        self.assertEqual(market["total_chips_millis"], 3000)
+        self.assertEqual(market["positions"][0]["cost_millis"], 3000)
+        self.assertEqual(market["positions"][0]["yes_shares_millis"], 3000)
 
 class ProposalApiTests(TestCase, TripFactoryMixin):
     def setUp(self):

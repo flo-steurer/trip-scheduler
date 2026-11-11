@@ -13,8 +13,9 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from .beermarket import BeermarketError, place_trade
 from .forms import TripForm
-from .models import Availability, ChipBalanceEvent, Market, MarketTrade, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
+from .models import Availability, Participant, Proposal, ProposalBookingInterest, ProposalVote, Trip
 from .services import (
     award_clicker_click,
     chip_holdings_history,
@@ -26,7 +27,6 @@ from .services import (
     market_performance,
     trip_results,
 )
-from world_cup.models import WorldCupMarket
 from world_cup.services import materialize_world_cup_markets_for_trip
 
 
@@ -467,62 +467,18 @@ def proposal_booking_interest_api(request, public_id, proposal_id):
 
 @require_POST
 def market_trade_api(request, public_id, market_id):
-    trip = _trip(public_id)
-    market = get_object_or_404(Market, trip=trip, pk=market_id)
     body = _json_body(request)
     if body is None:
         return JsonResponse({"error": "Expected a JSON request body."}, status=400)
-    participant, error = _participant_for_name(trip, body.get("name"))
-    if error:
-        return JsonResponse({"error": error}, status=400)
-    outcome = body.get("outcome")
-    if outcome not in Market.Outcome.values:
-        return JsonResponse({"error": "Choose Yes or No."}, status=400)
-    chips = body.get("chips")
-    if isinstance(chips, bool):
-        return JsonResponse({"error": "Choose a valid Beer Chip amount."}, status=400)
     try:
-        chip_millis_decimal = Decimal(str(chips)) * Market.SHARE_SCALE
-        chip_millis = int(chip_millis_decimal)
-    except (InvalidOperation, TypeError, ValueError):
-        return JsonResponse({"error": "Choose a valid Beer Chip amount."}, status=400)
-    if chip_millis_decimal != chip_millis or chip_millis < 1:
-        return JsonResponse({"error": "Spend at least 0.001 Beer Chips."}, status=400)
-    with transaction.atomic():
-        market = Market.objects.select_for_update().get(trip=trip, pk=market_id)
-        participant = Participant.objects.select_for_update().get(pk=participant.pk)
-        if market.is_resolved:
-            return JsonResponse({"error": "This Beermarket has already been resolved."}, status=400)
-        world_cup_market = WorldCupMarket.objects.select_related("fixture").filter(market=market).first()
-        if world_cup_market and not world_cup_market.fixture.is_tradeable:
-            return JsonResponse({"error": "This World Cup market is no longer accepting trades."}, status=400)
-        if chip_millis > participant.beer_chip_millis:
-            return JsonResponse({"error": "You do not have that many Beer Chips."}, status=400)
-        existing_trades = list(market.trades.all())
-        if not existing_trades:
-            seed_chips = Market.seed_chips_for_trip(trip)
-            if market.seed_chips < seed_chips:
-                market.seed_chips = seed_chips
-                market.save(update_fields=["seed_chips"])
-        _yes_shares, _no_shares, yes_price = market.share_market_state(existing_trades)
-        entry_odds = round((yes_price if outcome == Market.Outcome.YES else 1 - yes_price) * 100)
-        shares_millis = market.shares_for_cost(existing_trades, outcome, chip_millis)
-        participant.beer_chip_millis -= chip_millis
-        participant.save(update_fields=["beer_chip_millis"])
-        ChipBalanceEvent.objects.create(
-            participant=participant,
-            amount_millis=-chip_millis,
-            balance_after_millis=participant.beer_chip_millis,
-            reason=ChipBalanceEvent.Reason.MARKET_TRADE,
+        receipt = place_trade(
+            trip_public_id=public_id,
+            market_id=market_id,
+            participant_name=body.get("name"),
+            outcome=body.get("outcome"),
+            chips=body.get("chips"),
         )
-        MarketTrade.objects.create(
-            market=market,
-            participant=participant,
-            outcome=outcome,
-            chips=max(1, chip_millis // Market.SHARE_SCALE),
-            entry_odds=entry_odds,
-            cost_millis=chip_millis,
-            shares_millis=shares_millis,
-        )
-    _activity(request, participant, f"market_trade_bought_{outcome}_{chip_millis}")
-    return _results_response(trip, participant=_participant_payload(participant))
+    except BeermarketError as error:
+        return JsonResponse({"error": error.public_message}, status=400)
+    _activity(request, receipt.participant, receipt.activity_action)
+    return _results_response(receipt.trip, participant=_participant_payload(receipt.participant))

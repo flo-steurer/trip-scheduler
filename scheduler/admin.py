@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 
+from .beermarket import settle_market
 from .models import Availability, ClickerAccount, ClickerDailyConversion, DailyBeercoinGrant, Market, MarketTrade, Participant, Trip
 
 
@@ -93,7 +94,7 @@ class MarketAdmin(admin.ModelAdmin):
                 skipped_automatic += 1
                 continue
             try:
-                awarded += market.resolve(outcome)
+                awarded += settle_market(market_id=market.id, outcome=outcome, allow_automatic=False)
                 resolved += 1
             except ValidationError:
                 continue

@@ -5,13 +5,14 @@ from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
+from .beermarket import market_performance as beermarket_performance
+from .beermarket import project_trip_markets
 from .models import (
     Availability,
     ChipBalanceEvent,
     ClickerAccount,
     ClickerDailyConversion,
     DailyBeercoinGrant,
-    Market,
     Participant,
     Proposal,
 )
@@ -224,79 +225,9 @@ def clicker_leaderboard(trip):
     return entries
 
 
-def _format_chip_millis(amount_millis, include_sign=False):
-    whole_chips, fractional_millis = divmod(abs(amount_millis), 1000)
-    value = (
-        str(whole_chips)
-        if not fractional_millis
-        else f"{whole_chips}.{fractional_millis:03d}".rstrip("0")
-    )
-    if include_sign and amount_millis > 0:
-        return f"+{value}"
-    if amount_millis < 0:
-        return f"-{value}"
-    return value
-
-
 def market_performance(trip):
     """Return final P/L for participants in settled markets only."""
-    markets = trip.markets.filter(
-        resolved_outcome__in=Market.Outcome.values,
-    ).prefetch_related("trades__participant")
-    totals = {}
-
-    for market in markets:
-        results_by_participant = defaultdict(lambda: {"spent_millis": 0, "payout_millis": 0, "name": ""})
-        for trade in market.trades.all():
-            result = results_by_participant[trade.participant_id]
-            result["name"] = trade.participant.name
-            result["spent_millis"] += (
-                trade.cost_millis
-                if trade.cost_millis is not None
-                else trade.chips * Market.SHARE_SCALE
-            )
-            if trade.outcome == market.resolved_outcome:
-                result["payout_millis"] += (
-                    trade.shares_millis
-                    if trade.shares_millis is not None
-                    else trade.chips * Market.SHARE_SCALE
-                )
-
-        for participant_id, result in results_by_participant.items():
-            entry = totals.setdefault(participant_id, {
-                "name": result["name"],
-                "spent_millis": 0,
-                "payout_millis": 0,
-                "wins": 0,
-                "losses": 0,
-                "market_count": 0,
-            })
-            entry["spent_millis"] += result["spent_millis"]
-            entry["payout_millis"] += result["payout_millis"]
-            entry["market_count"] += 1
-            net_millis = result["payout_millis"] - result["spent_millis"]
-            if net_millis > 0:
-                entry["wins"] += 1
-            elif net_millis < 0:
-                entry["losses"] += 1
-
-    entries = []
-    for entry in totals.values():
-        entry["net_millis"] = entry["payout_millis"] - entry["spent_millis"]
-        entry["spent"] = _format_chip_millis(entry["spent_millis"])
-        entry["payout"] = _format_chip_millis(entry["payout_millis"])
-        entry["net"] = _format_chip_millis(entry["net_millis"], include_sign=True)
-        entry["net_kind"] = "gain" if entry["net_millis"] > 0 else "loss" if entry["net_millis"] < 0 else "even"
-        entries.append(entry)
-    entries.sort(key=lambda entry: (-entry["net_millis"], entry["name"].casefold()))
-    for rank, entry in enumerate(entries, start=1):
-        entry["rank"] = rank
-
-    return {
-        "entries": entries,
-        "biggest_winner": next((entry for entry in entries if entry["net_millis"] > 0), None),
-        "biggest_loser": next((entry for entry in reversed(entries) if entry["net_millis"] < 0), None),
-    }
+    return beermarket_performance(trip=trip)
 
 
 def chip_holdings_history(trip):
@@ -490,95 +421,7 @@ def trip_results(trip):
     for proposal in proposal_results:
         proposal.pop("created_at_timestamp", None)
 
-    markets = list(trip.markets.prefetch_related("trades__participant").select_related("world_cup_market__fixture"))
-    market_results = []
-    for market in markets:
-        world_cup_market = getattr(market, "world_cup_market", None)
-        fixture = world_cup_market.fixture if world_cup_market else None
-        trades = list(market.trades.all())
-        _yes_shares, _no_shares, yes_price = market.share_market_state(trades)
-        odds_history = [{"timestamp": market.created_at.isoformat(), "yes_odds": 50}]
-        positions = defaultdict(lambda: {
-            "yes_shares_millis": 0,
-            "no_shares_millis": 0,
-            "yes_cost_millis": 0,
-            "no_cost_millis": 0,
-            "cost_millis": 0,
-        })
-        prior_trades = []
-        for trade in trades:
-            position = positions[trade.participant_id]
-            position["name"] = trade.participant.name
-            trade_shares_millis = trade.shares_millis if trade.shares_millis is not None else trade.chips * market.SHARE_SCALE
-            trade_cost_millis = trade.cost_millis if trade.cost_millis is not None else trade.chips * market.SHARE_SCALE
-            position["cost_millis"] += trade_cost_millis
-            if trade.outcome == "yes":
-                position["yes_shares_millis"] += trade_shares_millis
-                position["yes_cost_millis"] += trade_cost_millis
-            else:
-                position["no_shares_millis"] += trade_shares_millis
-                position["no_cost_millis"] += trade_cost_millis
-            prior_trades.append(trade)
-            _a, _b, historical_yes_price = market.share_market_state(prior_trades)
-            odds_history.append({"timestamp": trade.created_at.isoformat(), "yes_odds": round(historical_yes_price * 100)})
-        payouts = defaultdict(int)
-        if market.is_resolved:
-            for trade in trades:
-                if trade.outcome == market.resolved_outcome:
-                    payouts[trade.participant_id] += trade.shares_millis if trade.shares_millis is not None else trade.chips * market.SHARE_SCALE
-        market_positions = [{
-            "name": shares["name"],
-            "yes_shares_millis": shares["yes_shares_millis"],
-            "no_shares_millis": shares["no_shares_millis"],
-            "cost_millis": shares["cost_millis"],
-            "mark_value_millis": round(
-                shares["yes_shares_millis"] * yes_price
-                + shares["no_shares_millis"] * (1 - yes_price)
-            ),
-            "profit_loss_millis": round(
-                shares["yes_shares_millis"] * yes_price
-                + shares["no_shares_millis"] * (1 - yes_price)
-            ) - shares["cost_millis"],
-            "yes_entry_odds": (
-                round(shares["yes_cost_millis"] / shares["yes_shares_millis"] * 100)
-                if shares["yes_shares_millis"]
-                else None
-            ),
-            "no_entry_odds": (
-                round(shares["no_cost_millis"] / shares["no_shares_millis"] * 100)
-                if shares["no_shares_millis"]
-                else None
-            ),
-            "yes_payout_millis": shares["yes_shares_millis"],
-            "no_payout_millis": shares["no_shares_millis"],
-            "payout_millis": payouts.get(participant_id, 0),
-        } for participant_id, shares in sorted(
-            positions.items(),
-            key=lambda item: (-item[1]["cost_millis"], item[1]["name"].casefold()),
-        )]
-        yes_odds = round(yes_price * 100)
-        no_odds = 100 - yes_odds
-        total_chips_millis = sum(trade.cost_millis if trade.cost_millis is not None else trade.chips * market.SHARE_SCALE for trade in trades)
-        market_results.append({
-            "id": market.id,
-            "question": market.question,
-            "is_resolved": market.is_resolved,
-            "is_tradeable": not market.is_resolved and (not fixture or fixture.is_tradeable),
-            "resolved_outcome": market.resolved_outcome,
-            "yes_odds": yes_odds,
-            "no_odds": no_odds,
-            "total_chips_millis": total_chips_millis,
-            "odds_history": odds_history,
-            "positions": market_positions,
-            "world_cup": {
-                "home_team": fixture.home_team,
-                "away_team": fixture.away_team,
-                "kickoff_at": fixture.kickoff_at.isoformat(),
-                "status": fixture.status,
-                "current_score": fixture.current_score,
-                "final_score": fixture.final_score,
-            } if fixture else None,
-        })
+    market_results = project_trip_markets(trip=trip)
 
     return {
         "daily": daily,
